@@ -6,6 +6,24 @@ constexpr const char* PATTERN =
     "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}"
     "| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
 
+std::string normalize_nfc(const std::string& input)
+{
+    utf8proc_uint8_t* normalized = utf8proc_NFC(
+        reinterpret_cast<const utf8proc_uint8_t*>(input.c_str())
+    );
+
+    if (!normalized)
+        throw std::runtime_error("UTF-8 normalization failed");
+
+    std::string result(
+        reinterpret_cast<const char*>(normalized)
+    );
+
+    free(normalized);
+
+    return result;
+}
+
 std::vector<std::string> regex_split(const std::string& text) 
 {
     int errorcode;

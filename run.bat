@@ -23,7 +23,7 @@ set SRC=..\src\tokenizer.cpp
 
 set INCLUDE_DIRS=/I..\inc /I..\external\inc\
 set LIBRARY_DIRS=/LIBPATH:..\external\lib\
-set LIBRARIES=Catch2.lib Catch2Main.lib pcre2-8-static.lib user32.lib shell32.lib kernel32.lib
+set LIBRARIES=Catch2.lib Catch2Main.lib pcre2-8-static.lib utf8proc_static.lib user32.lib shell32.lib kernel32.lib
 
 if "%1"=="" (
     echo Usage:Specify a flag run.bat dbg ^| rel ^| all

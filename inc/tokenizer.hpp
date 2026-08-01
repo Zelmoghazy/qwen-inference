@@ -9,5 +9,10 @@
 #define UTF8PROC_STATIC
 #include <utf8proc/utf8proc.h>
 
+
+std::string decode_id(int id);
+std::vector<int> encode(const std::string& text);
+void init_tokenizer(void);
+
 std::string normalize_nfc(const std::string& input);
-std::vector<std::string> regex_split(const std::string& text);
+std::vector<std::string> regex_split(const std::string& text) ;

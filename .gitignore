@@ -1,3 +1,5 @@
 .cache
 build
 *.ctm
+.clang-tidy
+settings.json

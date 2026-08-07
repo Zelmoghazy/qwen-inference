@@ -222,6 +222,7 @@ TEST_CASE("Testing the generated lookup table against tokenizer.json", "[bpe][me
     std::vector<int> ids(BYTE_TO_ID, BYTE_TO_ID + 256);
     std::vector<int> sorted_ids = ids;
     std::sort(sorted_ids.begin(), sorted_ids.end());
+    
     auto last = std::unique(sorted_ids.begin(), sorted_ids.end());
     REQUIRE(std::distance(sorted_ids.begin(), last) == 256);
  

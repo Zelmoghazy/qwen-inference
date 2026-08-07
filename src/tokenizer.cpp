@@ -22,8 +22,6 @@ int special_token_to_id[] = {
     151659, 151660, 151661, 151662, 151663, 151664
 };
 
-
-struct MergeRule { int rank; int result_id; };
 enum class SegmentType
 {
     Normal,
@@ -33,25 +31,23 @@ enum class SegmentType
 struct Segment
 {
     SegmentType type;
-    int    id;
-    size_t start;
-    size_t end;
+    int         id;
+    size_t      start;
+    size_t      end;
 };
 
+struct MergeRule { int rank; int result_id; };
 std::unordered_map<uint64_t, MergeRule> g_merge_lookup;
 
 std::string normalize_nfc(const std::string& input)
 {
-    utf8proc_uint8_t* normalized = utf8proc_NFC(
-        reinterpret_cast<const utf8proc_uint8_t*>(input.c_str())
-    );
+    utf8proc_uint8_t* normalized = utf8proc_NFC(reinterpret_cast<const utf8proc_uint8_t*>(input.c_str()));
 
-    if (!normalized)
+    if (!normalized){
         throw std::runtime_error("UTF-8 normalization failed");
+    }
 
-    std::string result(
-        reinterpret_cast<const char*>(normalized)
-    );
+    std::string result(reinterpret_cast<const char*>(normalized));
 
     free(normalized);
 

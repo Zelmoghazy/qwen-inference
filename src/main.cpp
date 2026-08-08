@@ -1,10 +1,31 @@
 
+#include <cassert>
 #include <print>
 #include <string>
 #include <vector>
 #include "tokenizer.hpp"
 
 #include <gguf.hpp>
+
+
+struct Config
+{
+    u32 embedding_length;
+    u32 block_count;
+    u32 attention_head_count;
+    u32 attention_head_count_kv;
+    u32 feed_forward_length;
+    u32 alignment = 32;
+    f32 rms_epsilon;
+    f32 rope_freq;
+};
+
+static bool ends_with(std::string_view s, std::string_view suffix)
+{
+    return s.size() >= suffix.size() &&
+           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 
 int main(void)
 {
@@ -18,6 +39,7 @@ int main(void)
     HANDLE Mapping = CreateFileMappingA(File, 0, PAGE_READONLY, 0, 0, 0);
     
     Data gguf;
+    Config cfg;
 
     u8 *file_base = (u8 *)MapViewOfFile(Mapping, FILE_MAP_READ, 0, 0, 0);
     gguf.ptr = file_base;
@@ -29,18 +51,80 @@ int main(void)
     {
         gguf_string key  = read_string(&gguf);
         u32        *type = Consume(&gguf, u32);
+
         if (!key.data || !type)
         {
             return 1;
         }
- 
-        std::print("{:>3}. {} = ", i, sv(key));
+
+        std::string_view meta_key = sv(key);
+        gguf_scalar_type value;
+
+        bool consumed = get_scalar_value(&gguf, *type,  value);
+
+        if(consumed)
+        {
+            if (ends_with(meta_key, "embedding_length"))
+            {
+                assert(*type == GGUF_TYPE_UINT32);
+                cfg.embedding_length = value.UINT32;
+            }
+            else if (ends_with(meta_key, "block_count"))
+            {
+                assert(*type == GGUF_TYPE_UINT32);
+                cfg.block_count = value.UINT32;
+            }
+            else if (ends_with(meta_key, "attention.head_count_kv"))
+            {
+                assert(*type == GGUF_TYPE_UINT32);
+                cfg.attention_head_count_kv = value.UINT32;
+            }
+            else if (ends_with(meta_key, "attention.head_count"))
+            {
+                assert(*type == GGUF_TYPE_UINT32);
+                cfg.attention_head_count = value.UINT32;
+            }
+            else if (ends_with(meta_key, "feed_forward_length"))
+            {
+                assert(*type == GGUF_TYPE_UINT32);
+                cfg.feed_forward_length = value.UINT32;
+            }
+            else if (ends_with(meta_key, "attention.layer_norm_rms_epsilon"))
+            {
+                assert(*type == GGUF_TYPE_FLOAT32);
+                cfg.rms_epsilon = value.FLOAT32;
+            }
+            else if (ends_with(meta_key, "rope.freq_base"))
+            {
+                assert(*type == GGUF_TYPE_FLOAT32);
+                cfg.rope_freq = value.FLOAT32;
+            }
+            else if (ends_with(meta_key, "general.alignment"))
+            {
+                assert(*type == GGUF_TYPE_UINT32);
+                cfg.alignment = value.UINT32;
+            }
+            std::println("{:>3}. {} = (scalar, type={})", i, meta_key, gguf_type_name(*type));
+        }
+
+        std::print("{:>3}. {} = ", i, meta_key);
+
         if (!print_value(&gguf, *type))
         {
             return 1;
         }
         std::println("");
     }
+    std::println("");
+    std::println("-- config --");
+    std::println("embedding_length:       {}", cfg.embedding_length);
+    std::println("block_count:            {}", cfg.block_count);
+    std::println("attention_head_count:   {}", cfg.attention_head_count);
+    std::println("attention_head_count_kv:{}", cfg.attention_head_count_kv);
+    std::println("feed_forward_length:    {}", cfg.feed_forward_length);
+    std::println("rms_epsilon:            {}", cfg.rms_epsilon);
+    std::println("alignment:              {}", cfg.alignment);
+    std::println("rope_freq:              {}", cfg.rope_freq);
  
     std::println("");
     std::println("-- tensors --");

@@ -54,6 +54,22 @@ enum gguf_type : u32
     GGUF_TYPE_INT64   = 11,
     GGUF_TYPE_FLOAT64 = 12,
 };
+
+union gguf_scalar_type
+{
+    u8       UINT8;
+    int8_t   INT8;
+    uint16_t UINT16;
+    int16_t  INT16;
+    u32      UINT32;
+    int32_t  INT32;
+    f32      FLOAT32;
+    bool     BOOL;
+    u64      UINT64;
+    i64      INT64;
+    f64      FLOAT64;
+};
+
 #define Consume(data, type) (type *)consume_size(data, sizeof(type))
 
 void* consume_size(Data* d, u32 size);
@@ -62,3 +78,5 @@ bool skip_value(Data *d, u32 type, int depth = 0);
 gguf_string read_string(Data *d);
 std::string_view sv(const gguf_string &s);
 const char* ggml_type_name(u32 t);
+bool get_scalar_value(Data *d, u32 type, gguf_scalar_type &out);
+const char* gguf_type_name(u32 t);

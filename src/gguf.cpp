@@ -57,7 +57,7 @@ const char* ggml_type_name(u32 t)
     }
 }
 
-static const char* gguf_type_name(u32 t)
+const char* gguf_type_name(u32 t)
 {
     switch (t)
     {
@@ -82,11 +82,23 @@ static u64 gguf_type_size(u32 t)
 {
     switch (t)
     {
-        case GGUF_TYPE_UINT8:  case GGUF_TYPE_INT8:  case GGUF_TYPE_BOOL:    return 1;
-        case GGUF_TYPE_UINT16: case GGUF_TYPE_INT16:                         return 2;
-        case GGUF_TYPE_UINT32: case GGUF_TYPE_INT32: case GGUF_TYPE_FLOAT32: return 4;
-        case GGUF_TYPE_UINT64: case GGUF_TYPE_INT64: case GGUF_TYPE_FLOAT64: return 8;
-        default: return 0;
+        case GGUF_TYPE_UINT8:
+        case GGUF_TYPE_INT8:
+        case GGUF_TYPE_BOOL:
+            return 1;
+        case GGUF_TYPE_UINT16:
+        case GGUF_TYPE_INT16:
+            return 2;
+        case GGUF_TYPE_UINT32:
+        case GGUF_TYPE_INT32:
+        case GGUF_TYPE_FLOAT32:
+            return 4;
+        case GGUF_TYPE_UINT64:
+        case GGUF_TYPE_INT64:
+        case GGUF_TYPE_FLOAT64:
+            return 8;
+        default:
+            return 0;
     }
 }
 
@@ -152,19 +164,178 @@ static bool print_scalar(Data *d, u32 type)
 {
     switch (type)
     {
-        case GGUF_TYPE_UINT8:   { u8      *v = Consume(d, u8);      if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_INT8:    { int8_t  *v = Consume(d, int8_t);  if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_UINT16:  { uint16_t*v = Consume(d, uint16_t);if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_INT16:   { int16_t *v = Consume(d, int16_t); if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_UINT32:  { u32     *v = Consume(d, u32);     if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_INT32:   { int32_t *v = Consume(d, int32_t); if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_FLOAT32: { f32     *v = Consume(d, f32);     if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_BOOL:    { u8      *v = Consume(d, u8);      if (!v) return false; std::print("{}", *v ? "true" : "false"); return true; }
-        case GGUF_TYPE_UINT64:  { u64     *v = Consume(d, u64);     if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_INT64:   { i64     *v = Consume(d, i64);     if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_FLOAT64: { f64     *v = Consume(d, f64);     if (!v) return false; std::print("{}", *v); return true; }
-        case GGUF_TYPE_STRING:  { gguf_string s = read_string(d); if (!s.data && s.len) return false; std::print("\"{}\"", sv(s)); return true; }
-        default: return false;
+    case GGUF_TYPE_UINT8: {
+        u8 *v = Consume(d, u8);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_INT8: {
+        int8_t *v = Consume(d, int8_t);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_UINT16: {
+        uint16_t *v = Consume(d, uint16_t);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_INT16: {
+        int16_t *v = Consume(d, int16_t);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_UINT32: {
+        u32 *v = Consume(d, u32);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_INT32: {
+        int32_t *v = Consume(d, int32_t);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_FLOAT32: {
+        f32 *v = Consume(d, f32);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_BOOL: {
+        u8 *v = Consume(d, u8);
+        if (!v)
+            return false;
+        std::print("{}", *v ? "true" : "false");
+        return true;
+    }
+    case GGUF_TYPE_UINT64: {
+        u64 *v = Consume(d, u64);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_INT64: {
+        i64 *v = Consume(d, i64);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_FLOAT64: {
+        f64 *v = Consume(d, f64);
+        if (!v)
+            return false;
+        std::print("{}", *v);
+        return true;
+    }
+    case GGUF_TYPE_STRING: {
+        gguf_string s = read_string(d);
+        if (!s.data && s.len)
+            return false;
+        std::print("\"{}\"", sv(s));
+        return true;
+    }
+    default:
+        return false;
+    }
+}
+
+bool get_scalar_value(Data *d, u32 type, gguf_scalar_type &out)
+{
+    switch (type)
+    {
+    case GGUF_TYPE_UINT8: {
+        u8 *v = Consume(d, u8);
+        if (!v)
+            return false;
+        out.UINT8 = *v;
+        return true;
+    }
+    case GGUF_TYPE_INT8: {
+        int8_t *v = Consume(d, int8_t);
+        if (!v)
+            return false;
+        out.INT8 = *v;
+        return true;
+    }
+    case GGUF_TYPE_UINT16: {
+        uint16_t *v = Consume(d, uint16_t);
+        if (!v)
+            return false;
+        out.UINT16 = *v;
+        return true;
+    }
+    case GGUF_TYPE_INT16: {
+        int16_t *v = Consume(d, int16_t);
+        if (!v)
+            return false;
+        out.INT16 = *v;
+        return true;
+    }
+    case GGUF_TYPE_UINT32: {
+        u32 *v = Consume(d, u32);
+        if (!v)
+            return false;
+        out.UINT32 = *v;
+        return true;
+    }
+    case GGUF_TYPE_INT32: {
+        int32_t *v = Consume(d, int32_t);
+        if (!v)
+            return false;
+        out.INT32 = *v;
+        return true;
+    }
+    case GGUF_TYPE_FLOAT32: {
+        f32 *v = Consume(d, f32);
+        if (!v)
+            return false;
+        out.FLOAT32 = *v;
+        return true;
+    }
+    case GGUF_TYPE_BOOL: {
+        u8 *v = Consume(d, u8);
+        if (!v)
+            return false;
+        out.BOOL = *v;
+        return true;
+    }
+    case GGUF_TYPE_UINT64: {
+        u64 *v = Consume(d, u64);
+        if (!v)
+            return false;
+        out.UINT64 = (f64) *v;
+        return true;
+    }
+    case GGUF_TYPE_INT64: {
+        i64 *v = Consume(d, i64);
+        if (!v)
+            return false;
+        out.INT64 = (f64) *v;
+        return true;
+    }
+    case GGUF_TYPE_FLOAT64: {
+        f64 *v = Consume(d, f64);
+        if (!v)
+            return false;
+        out.FLOAT64 = *v;
+        return true;
+    }
+    default:
+        return false; 
     }
 }
 
@@ -204,5 +375,4 @@ bool print_value(Data *d, u32 type, int depth, u64 preview)
     
     return true;
 }
-
 

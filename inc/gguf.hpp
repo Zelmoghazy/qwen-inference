@@ -1,20 +1,9 @@
 #pragma once
 
-#ifdef _WIN32
-    #define WIN32_LEAN_AND_MEAN 
-    #define VC_EXTRALEAN
-    #include <windows.h>
-#endif
 
-#include <cstdint>
-#include <print>
+#include <utils.hpp>
+#include <model.hpp>
 
-typedef uint8_t u8;
-typedef uint64_t u64;
-typedef int64_t i64;
-typedef uint32_t u32;
-typedef float f32;
-typedef double f64;
 
 struct Data
 {
@@ -22,23 +11,22 @@ struct Data
     i64 len;
 };
 
+/*
+    https://github.com/ggml-org/ggml/blob/master/docs/gguf.md
+ */
+
 #pragma pack(push, 1)
-struct gguf_header
+struct GGUFHeader
 {
-    u32 magic;
+    u32 magic;              // @Note: Little Endian
     u32 version;
     u64 tensor_count;
     u64 metadata_kv_count; 
 };
 #pragma pack(pop)
+static_assert(sizeof(GGUFHeader) == 24, "GGUFHeader should be 24 bytes");
 
-struct gguf_string
-{
-    u64         len  = 0;
-    const char *data = nullptr;
-};
-
-enum gguf_type : u32
+enum GGUFType : u32
 {
     GGUF_TYPE_UINT8   = 0,
     GGUF_TYPE_INT8    = 1,
@@ -55,7 +43,7 @@ enum gguf_type : u32
     GGUF_TYPE_FLOAT64 = 12,
 };
 
-union gguf_scalar_type
+union GGUFScalarType
 {
     u8       UINT8;
     int8_t   INT8;
@@ -75,8 +63,9 @@ union gguf_scalar_type
 void* consume_size(Data* d, u32 size);
 bool print_value(Data *d, u32 type, int depth=0, u64 preview = 8);
 bool skip_value(Data *d, u32 type, int depth = 0);
-gguf_string read_string(Data *d);
-std::string_view sv(const gguf_string &s);
+std::string_view read_gguf_string(Data *d);
 const char* ggml_type_name(u32 t);
-bool get_scalar_value(Data *d, u32 type, gguf_scalar_type &out);
+bool get_scalar_value(Data *d, u32 type, GGUFScalarType &out);
 const char* gguf_type_name(u32 t);
+void print_scalar_value(u32 idx, std::string_view &meta_key, u32 type, GGUFScalarType value);
+bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base);

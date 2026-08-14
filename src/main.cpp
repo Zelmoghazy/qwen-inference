@@ -1,34 +1,47 @@
-
-#include <cassert>
-#include <print>
-#include <string>
-#include <vector>
 #include "tokenizer.hpp"
+#include "gguf.hpp"
+#include "engine.hpp"
 
-#include <gguf.hpp>
 
-
-struct Config
+void silu(const f32 *input, f32 *output, u32 size)
 {
-    u32 embedding_length;
-    u32 block_count;
-    u32 attention_head_count;
-    u32 attention_head_count_kv;
-    u32 feed_forward_length;
-    u32 alignment = 32;
-    f32 rms_epsilon;
-    f32 rope_freq;
-};
-
-static bool ends_with(std::string_view s, std::string_view suffix)
-{
-    return s.size() >= suffix.size() &&
-           s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+    for (u32 i = 0; i < size; i++)
+    {
+        f32 v = input[i];
+        output[i] = v / (1.0f + expf(-v));
+    }
 }
 
+void rmsnorm(const f32 *x, const f32 *weight, f32 *out, u32 n, f32 eps = 1e-6f)
+{
+    f32 ss = 0.0f;
+    for (u32 i = 0; i < n; i++) {
+        ss += x[i] * x[i];
+    }
+    f32 scale = 1.0f / sqrtf(ss / n + eps);
+    for (u32 i = 0; i < n; i++) {
+        out[i] = x[i] * scale * weight[i];
+    }
+}
+
+void rope(f32 *vec, u32 head_dim, u32 pos, f32 theta_base = 1000000.0f)
+{
+    u32 half = head_dim / 2;
+    for (u32 i = 0; i < half; i++)
+    {
+        f32 freq = 1.0f / powf(theta_base, (2.0f * i) / head_dim);
+        f32 angle = pos * freq;
+        f32 c = cosf(angle), s = sinf(angle);
+        f32 x0 = vec[i], x1 = vec[i + half];
+        vec[i]        = x0 * c - x1 * s;
+        vec[i + half] = x0 * s + x1 * c;
+    }
+}
 
 int main(void)
 {
+    Profile("Main function");
+
     HANDLE File = CreateFileA("C:\\Users\\zezo_\\.lmstudio\\models\\lmstudio-community"
                               "\\Qwen2.5-3B-Instruct-GGUF\\Qwen2.5-3B-Instruct-Q8_0.gguf",
                                GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE,
@@ -39,131 +52,116 @@ int main(void)
     HANDLE Mapping = CreateFileMappingA(File, 0, PAGE_READONLY, 0, 0, 0);
     
     Data gguf;
-    Config cfg;
+    ModelInfo model;
 
     u8 *file_base = (u8 *)MapViewOfFile(Mapping, FILE_MAP_READ, 0, 0, 0);
     gguf.ptr = file_base;
     gguf.len = static_cast<i64>(size.QuadPart);
     
-    gguf_header *header = Consume(&gguf,gguf_header);
-    
-    for (u64 i = 0; i < header->metadata_kv_count; i++)
+    parse_gguf(gguf, model, size.QuadPart, file_base);
+
+
+    u32 head_dim = model.cfg.embedding_length / model.cfg.attention_head_count;
+    assert(head_dim == 128);
+
+    u32 gqa_group_size = model.cfg.attention_head_count / model.cfg.attention_head_count_kv;
+    assert(gqa_group_size == 8);
+
+    u32 n_layers = (u32)model.blocks.size();
+    u32 kv_dim = 256; // attention_head_count_kv * head_dim
+    u32 max_seq = 2048;
+    f32 *kv_cache_k = (f32*)malloc(sizeof(f32) * n_layers * max_seq * kv_dim);
+    f32 *kv_cache_v = (f32*)malloc(sizeof(f32) * n_layers * max_seq * kv_dim);
+
+    u32 ffn_dim = model.blocks[0].ffn_gate.dims[1];
+    f32 *gate = (f32*)malloc(sizeof(f32) * ffn_dim);
+    f32 *up   = (f32*)malloc(sizeof(f32) * ffn_dim);
+    f32 *scores = (f32*)malloc(sizeof(f32) * max_seq);
+
+    std::string prompt = "Hello, world!";
+    std::vector<int> tokens =  encode(prompt);    
+
+    for(u32 cur_pos = 0; cur_pos < tokens.size(); cur_pos++)
     {
-        gguf_string key  = read_string(&gguf);
-        u32        *type = Consume(&gguf, u32);
+        f32 x[2048];      
+        embed_token(model.token_embd, tokens[cur_pos], x, model.cfg.embedding_length);
 
-        if (!key.data || !type)
+        for (u32 layer_idx = 0; layer_idx < n_layers; layer_idx++)
         {
-            return 1;
+            BlockInfo &l = model.blocks[layer_idx];
+
+            f32 normed_attn[2048];
+            rmsnorm(x, (f32*)l.attn_norm.tensor_data, normed_attn, 2048);
+
+            f32 q_full[2048]; 
+            f32 k_full[256];  
+            f32 v_full[256];
+
+            matmul_q8_0((block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], x, q_full);
+            matmul_q8_0((block_q8_0*)l.attn_k.tensor_data, l.attn_k.dims[0], l.attn_k.dims[1], x, k_full);
+            matmul_q8_0((block_q8_0*)l.attn_v.tensor_data, l.attn_v.dims[0], l.attn_v.dims[1],  x, v_full);
+
+            for (u32 h = 0; h < model.cfg.attention_head_count; h++)
+                rope(q_full + h*head_dim, head_dim, cur_pos);
+            for (u32 h = 0; h < model.cfg.attention_head_count_kv; h++)
+                rope(k_full + h*head_dim, head_dim, cur_pos);
+
+            f32 *k_cache_slot = kv_cache_k + (layer_idx * max_seq + cur_pos) * kv_dim;
+            f32 *v_cache_slot = kv_cache_v + (layer_idx * max_seq + cur_pos) * kv_dim;
+            memcpy(k_cache_slot, k_full, sizeof(f32) * kv_dim);
+            memcpy(v_cache_slot, v_full, sizeof(f32) * kv_dim);
+
+            f32 o_full[2048]; 
+
+            for (u32 h = 0; h < model.cfg.attention_head_count; h++)
+            {
+                u32 kv = h / gqa_group_size;
+                f32 *qh = q_full + h*head_dim;
+                f32 scale = 1.0f / sqrtf((f32)head_dim);
+
+                for (u32 t = 0; t <= cur_pos; t++)
+                {
+                    f32 *kh_t = kv_cache_k + (layer_idx * max_seq + t) * kv_dim + kv*head_dim;
+                    scores[t] = vec_dot_f32(qh, kh_t, head_dim) * scale;
+                }
+                softmax_f32(scores, scores, cur_pos + 1);
+
+                f32 *oh = o_full + h * head_dim;
+                for (u32 i = 0; i < head_dim; i++) oh[i] = 0.0f;
+                for (u32 t = 0; t <= cur_pos; t++)
+                {
+                    f32 *vh_t = kv_cache_v + (layer_idx * max_seq + t) * kv_dim + kv*head_dim;
+                    f32 w = scores[t];
+                    for (u32 i = 0; i < head_dim; i++) oh[i] += w * vh_t[i];
+                }
+            }
+            f32 attn_out[2048];
+            matmul_q8_0((block_q8_0*)l.attn_output.tensor_data, l.attn_output.dims[0], l.attn_output.dims[1], o_full, attn_out);
+
+            f32 residual[2048];
+            for (u32 i = 0; i < 2048; i++){
+                residual[i] = x[i] + attn_out[i]; 
+            }
+
+
+            f32 normed_ffn[2048];
+            rmsnorm(residual, (f32*)l.ffn_norm.tensor_data, normed_ffn, 2048);
+
+
+            matmul_q8_0((block_q8_0*)l.ffn_gate.tensor_data, l.ffn_gate.dims[0], l.ffn_gate.dims[1], residual, gate);
+            matmul_q8_0((block_q8_0*)l.ffn_up.tensor_data,   l.ffn_up.dims[0],   l.ffn_up.dims[1],   residual, up);
+
+            silu(gate, gate, ffn_dim);
+            for (u32 i = 0; i < ffn_dim; i++) gate[i] *= up[i];   // gate now holds silu(gate)*up
+
+            f32 ffn_out[2048];
+            matmul_q8_0((block_q8_0*)l.ffn_down.tensor_data, l.ffn_down.dims[0], l.ffn_down.dims[1], gate, ffn_out);
+
+            for (u32 i = 0; i < 2048; i++) x[i] = residual[i] + ffn_out[i];
         }
-
-        std::string_view meta_key = sv(key);
-        gguf_scalar_type value;
-
-        bool consumed = get_scalar_value(&gguf, *type,  value);
-
-        if(consumed)
-        {
-            if (ends_with(meta_key, "embedding_length"))
-            {
-                assert(*type == GGUF_TYPE_UINT32);
-                cfg.embedding_length = value.UINT32;
-            }
-            else if (ends_with(meta_key, "block_count"))
-            {
-                assert(*type == GGUF_TYPE_UINT32);
-                cfg.block_count = value.UINT32;
-            }
-            else if (ends_with(meta_key, "attention.head_count_kv"))
-            {
-                assert(*type == GGUF_TYPE_UINT32);
-                cfg.attention_head_count_kv = value.UINT32;
-            }
-            else if (ends_with(meta_key, "attention.head_count"))
-            {
-                assert(*type == GGUF_TYPE_UINT32);
-                cfg.attention_head_count = value.UINT32;
-            }
-            else if (ends_with(meta_key, "feed_forward_length"))
-            {
-                assert(*type == GGUF_TYPE_UINT32);
-                cfg.feed_forward_length = value.UINT32;
-            }
-            else if (ends_with(meta_key, "attention.layer_norm_rms_epsilon"))
-            {
-                assert(*type == GGUF_TYPE_FLOAT32);
-                cfg.rms_epsilon = value.FLOAT32;
-            }
-            else if (ends_with(meta_key, "rope.freq_base"))
-            {
-                assert(*type == GGUF_TYPE_FLOAT32);
-                cfg.rope_freq = value.FLOAT32;
-            }
-            else if (ends_with(meta_key, "general.alignment"))
-            {
-                assert(*type == GGUF_TYPE_UINT32);
-                cfg.alignment = value.UINT32;
-            }
-            std::println("{:>3}. {} = (scalar, type={})", i, meta_key, gguf_type_name(*type));
-        }
-
-        std::print("{:>3}. {} = ", i, meta_key);
-
-        if (!print_value(&gguf, *type))
-        {
-            return 1;
-        }
-        std::println("");
     }
-    std::println("");
-    std::println("-- config --");
-    std::println("embedding_length:       {}", cfg.embedding_length);
-    std::println("block_count:            {}", cfg.block_count);
-    std::println("attention_head_count:   {}", cfg.attention_head_count);
-    std::println("attention_head_count_kv:{}", cfg.attention_head_count_kv);
-    std::println("feed_forward_length:    {}", cfg.feed_forward_length);
-    std::println("rms_epsilon:            {}", cfg.rms_epsilon);
-    std::println("alignment:              {}", cfg.alignment);
-    std::println("rope_freq:              {}", cfg.rope_freq);
- 
-    std::println("");
-    std::println("-- tensors --");
- 
-    for (u64 i = 0; i < header->tensor_count; i++)
-    {
-        gguf_string name   = read_string(&gguf);
-        u32        *n_dims = Consume(&gguf, u32);
-        if (!name.data || !n_dims)
-        {
-            return 1;
-        }
- 
-        std::vector<u64> dims(*n_dims);
-        for (u32 d = 0; d < *n_dims; d++)
-        {
-            u64 *dim = Consume(&gguf, u64); 
-            if (!dim)
-            {
-                return 1;
-            }
-            dims[d] = *dim;
-        }
- 
-        u32 *ttype  = Consume(&gguf, u32);
-        u64 *offset = Consume(&gguf, u64);
-        if (!ttype || !offset)
-        {
-            return 1;
-        }
- 
-        std::print("{:>3}. {:<40} dims=[", i, sv(name));
-        for (u32 d = 0; d < *n_dims; d++)
-        {
-            if (d) std::print(",");
-            std::print("{}", dims[d]);
-        }
-        std::println("] type={} offset={}", ggml_type_name(*ttype), *offset);
-    }
+
+
     UnmapViewOfFile(file_base); 
     CloseHandle(Mapping);
     CloseHandle(File);

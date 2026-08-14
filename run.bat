@@ -13,17 +13,20 @@ set TEST_NAME=qwen_test
 
 :: /Bt /d2cgsummary 
 set CFLAGS=/fp:fast /W4 /MD /nologo /utf-8 /std:c++latest /arch:AVX 
-:: /SUBSYSTEM:CONSOLE /SUB-SYSTEM:WINDOWS /INCREMENTAL /time /Fe:%EXE_NAME%.exe
+:: /SUBSYSTEM:CONSOLE /SUB-SYSTEM:WINDOWS /INCREMENTAL /time /Fe:%EXE_NAME%.exe /DTRACY_ENABLE
 set L_FLAGS=/SUBSYSTEM:CONSOLE
 
 set APP_SRC=..\src\main.cpp
 set TEST_SRC=..\test\test.cpp 
 
-set SRC=..\src\tokenizer.cpp ..\src\qwen_tables.cpp
+set SRC=..\src\tokenizer.cpp ..\src\qwen_tables.cpp ..\src\gguf.cpp ..\src\engine.cpp
 
 set INCLUDE_DIRS=/I..\inc /I..\external\inc\
 set LIBRARY_DIRS=/LIBPATH:..\external\lib\
-set LIBRARIES=Catch2.lib Catch2Main.lib pcre2-8-static.lib utf8proc_static.lib simdjson.lib user32.lib shell32.lib kernel32.lib
+
+set LIBRARIES=pcre2-8-static.lib utf8proc_static.lib user32.lib shell32.lib kernel32.lib
+set TEST_LIBS=simdjson.lib Catch2.lib Catch2Main.lib 
+set PROFILE_LIBS=TracyClient.lib
 
 if "%1"=="" (
     echo Usage:Specify a flag run.bat dbg ^| rel ^| all
@@ -86,7 +89,7 @@ if "%1"=="all" (
 if "%1"=="test" (
     echo Building Tests...
     pushd .\build
-    cl %CFLAGS% /O2 %INCLUDE_DIRS% %TEST_SRC% %SRC% /Fe:%TEST_NAME%.exe /link %LIBRARY_DIRS% %LIBRARIES% %L_FLAGS%
+    cl %CFLAGS% /O2 %INCLUDE_DIRS% %TEST_SRC% %SRC% /Fe:%TEST_NAME%.exe /link %LIBRARY_DIRS% %LIBRARIES% %TEST_LIBS% %L_FLAGS%
     if errorlevel 1 goto :build_failed
     echo -----------------------------------------------------------------
     echo Tests Build Successful. 
@@ -96,6 +99,29 @@ if "%1"=="test" (
     echo Running...
     echo -----------------------------------------------------------------
     .\%TEST_NAME%.exe
+    goto :build_success
+)
+
+if "%1"=="prof" (
+    echo Building release with Tracy profiling...
+    pushd .\build
+    call :build_profile %EXE_NAME%
+    if errorlevel 1 goto :build_failed
+
+    echo -----------------------------------------------------------------
+    echo Tracy Profile Build Successful.
+    echo Build time :
+    ctime -end ../qwen.ctm
+
+    echo -----------------------------------------------------------------
+    echo Starting Tracy...
+    start "" "D:\Programming\Software\Tracy\tracy-profiler.exe" -a 127.0.0.1
+
+    echo -----------------------------------------------------------------
+    echo Running profiled application...
+    echo -----------------------------------------------------------------
+    .\%EXE_NAME%.exe
+
     goto :build_success
 )
 
@@ -117,6 +143,16 @@ cl /Zi %CFLAGS% /fsanitize=address %INCLUDE_DIRS% %APP_SRC% %SRC% /Fe:%~1.exe /l
 if errorlevel 1 (
     echo -----------------------------------------------------------------
     echo Build failed !
+    echo -----------------------------------------------------------------
+    exit /b 1
+)
+exit /b 0
+
+:build_profile
+cl %CFLAGS% /O2 /DTRACY_ENABLE %INCLUDE_DIRS% %APP_SRC% %SRC% /Fe:%~1.exe /link %LIBRARY_DIRS% %LIBRARIES% %PROFILE_LIBS% %L_FLAGS%
+if errorlevel 1 (
+    echo -----------------------------------------------------------------
+    echo Profile build failed!
     echo -----------------------------------------------------------------
     exit /b 1
 )

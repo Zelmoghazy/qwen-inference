@@ -1,6 +1,4 @@
-#include <unordered_map>
-#include <vector>
-#include <stdexcept>
+#include "utils.hpp"
 #include "tokenizer.hpp"
 
 extern const size_t VOCAB_SIZE;

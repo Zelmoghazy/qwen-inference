@@ -136,6 +136,7 @@ inline f32 dot_q8_0_f32(const block_q8_0 *row, u32 n_blocks, const f32 *x)
 
 void matmul_q8_0(const block_q8_0 *weight, u32 n_in, u32 n_out, const f32 *input, f32 *output)
 {
+    Profile("Matrix Multiplication");
     assert(n_in % 32 == 0 && "q8_0 rows must be a multiple of the 32-element block size");
     u32 blocks_per_row = n_in / 32;
 

@@ -16,3 +16,4 @@ void init_tokenizer(void);
 
 std::string normalize_nfc(const std::string& input);
 std::vector<std::string> regex_split(const std::string& text) ;
+std::string decode_id(int id); 

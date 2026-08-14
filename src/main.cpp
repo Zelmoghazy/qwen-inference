@@ -2,6 +2,13 @@
 #include "gguf.hpp"
 #include "engine.hpp"
 
+extern "C"{
+    #include "arena.h"
+}
+
+#define KB(n)                           (((u64)(n)) << 10)
+#define MB(n)                           (((u64)(n)) << 20)
+#define GB(n)                           (((u64)(n)) << 30)
 
 void silu(const f32 *input, f32 *output, u32 size)
 {
@@ -38,9 +45,43 @@ void rope(f32 *vec, u32 head_dim, u32 pos, f32 theta_base = 1000000.0f)
     }
 }
 
+f32 vec_dot_f32(const f32 *a, const f32 *b, u32 n)
+{
+    f32 sum = 0.0f;
+    for (u32 i = 0; i < n; i++) sum += a[i] * b[i];
+    return sum;
+}
+
+void softmax_f32(const f32 *input, f32 *output, u32 n)
+{
+    f32 max_val = input[0];
+    for (u32 i = 1; i < n; i++) if (input[i] > max_val) max_val = input[i];
+
+    f32 sum = 0.0f;
+    for (u32 i = 0; i < n; i++)
+    {
+        output[i] = expf(input[i] - max_val);
+        sum += output[i];
+    }
+    for (u32 i = 0; i < n; i++) output[i] /= sum;
+}
+
+u32 argmax(const f32 *logits, u32 n)
+{
+    u32 best = 0;
+    f32 best_val = logits[0];
+    for (u32 i = 1; i < n; i++)
+    {
+        if (logits[i] > best_val) { best_val = logits[i]; best = i; }
+    }
+    return best;
+}
+
 int main(void)
 {
     Profile("Main function");
+
+    arena_t *scratch_arena = arena_reserve(MB(500));
 
     HANDLE File = CreateFileA("C:\\Users\\zezo_\\.lmstudio\\models\\lmstudio-community"
                               "\\Qwen2.5-3B-Instruct-GGUF\\Qwen2.5-3B-Instruct-Q8_0.gguf",
@@ -60,31 +101,48 @@ int main(void)
     
     parse_gguf(gguf, model, size.QuadPart, file_base);
 
-
     u32 head_dim = model.cfg.embedding_length / model.cfg.attention_head_count;
     assert(head_dim == 128);
-
+    
     u32 gqa_group_size = model.cfg.attention_head_count / model.cfg.attention_head_count_kv;
     assert(gqa_group_size == 8);
-
-    u32 n_layers = (u32)model.blocks.size();
-    u32 kv_dim = 256; // attention_head_count_kv * head_dim
-    u32 max_seq = 2048;
-    f32 *kv_cache_k = (f32*)malloc(sizeof(f32) * n_layers * max_seq * kv_dim);
-    f32 *kv_cache_v = (f32*)malloc(sizeof(f32) * n_layers * max_seq * kv_dim);
-
-    u32 ffn_dim = model.blocks[0].ffn_gate.dims[1];
-    f32 *gate = (f32*)malloc(sizeof(f32) * ffn_dim);
-    f32 *up   = (f32*)malloc(sizeof(f32) * ffn_dim);
-    f32 *scores = (f32*)malloc(sizeof(f32) * max_seq);
-
-    std::string prompt = "Hello, world!";
-    std::vector<int> tokens =  encode(prompt);    
-
-    for(u32 cur_pos = 0; cur_pos < tokens.size(); cur_pos++)
+    
+    for (BlockInfo &l : model.blocks)
     {
-        f32 x[2048];      
-        embed_token(model.token_embd, tokens[cur_pos], x, model.cfg.embedding_length);
+        assert(l.attn_q.dims[0]==2048 && l.attn_q.dims[1]==2048);
+        assert(l.attn_k.dims[0]==2048 && l.attn_k.dims[1]==256);
+        assert(l.attn_v.dims[0]==2048 && l.attn_v.dims[1]==256);
+        assert(l.attn_output.dims[0]==2048 && l.attn_output.dims[1]==2048);
+        assert(l.ffn_gate.dims[0]==2048 && l.ffn_up.dims[0]==2048);
+        assert(l.ffn_down.dims[1]==2048);
+    }
+
+    #if 1
+    u32 n_layers = (u32)model.blocks.size();
+    u32 kv_dim   = model.cfg.attention_head_count_kv * head_dim; 
+    u32 max_seq  = 2048;
+    u32 ffn_dim  = model.blocks[0].ffn_gate.dims[1];
+    u32 vocab    = model.token_embd.dims[1];
+
+    f32 *kv_cache_k  = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * n_layers * max_seq * kv_dim);
+    f32 *kv_cache_v  = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * n_layers * max_seq * kv_dim);
+    
+    f32 *gate        = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * ffn_dim);
+    f32 *up          = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * ffn_dim);
+    f32 *attn_scores = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * max_seq);
+    f32 *logits      = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * vocab);
+    
+    std::string prompt = "Quantum Mechanics is the";
+    std::vector<int> tokens =  encode(prompt);    
+    u32 prompt_len = (u32)tokens.size();
+    u32 max_new_tokens = 200;
+
+    f32 x[2048];      
+
+    for(u32 cur_pos = 0; cur_pos < prompt_len + max_new_tokens; cur_pos++)
+    {
+        int tok = (cur_pos < prompt_len) ? tokens[cur_pos] : tokens.back();
+        embed_token(model.token_embd, tok, x, model.cfg.embedding_length);
 
         for (u32 layer_idx = 0; layer_idx < n_layers; layer_idx++)
         {
@@ -97,9 +155,14 @@ int main(void)
             f32 k_full[256];  
             f32 v_full[256];
 
-            matmul_q8_0((block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], x, q_full);
-            matmul_q8_0((block_q8_0*)l.attn_k.tensor_data, l.attn_k.dims[0], l.attn_k.dims[1], x, k_full);
-            matmul_q8_0((block_q8_0*)l.attn_v.tensor_data, l.attn_v.dims[0], l.attn_v.dims[1],  x, v_full);
+            matmul_q8_0((block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], normed_attn, q_full);
+            for (u32 i = 0; i < 2048; i++) q_full[i] += ((f32*)l.attn_q_bias.tensor_data)[i];
+
+            matmul_q8_0((block_q8_0*)l.attn_k.tensor_data, l.attn_k.dims[0], l.attn_k.dims[1], normed_attn, k_full);
+            for (u32 i = 0; i < 256; i++) k_full[i] += ((f32*)l.attn_k_bias.tensor_data)[i];
+
+            matmul_q8_0((block_q8_0*)l.attn_v.tensor_data, l.attn_v.dims[0], l.attn_v.dims[1],  normed_attn, v_full);
+            for (u32 i = 0; i < 256; i++) v_full[i] += ((f32*)l.attn_v_bias.tensor_data)[i];
 
             for (u32 h = 0; h < model.cfg.attention_head_count; h++)
                 rope(q_full + h*head_dim, head_dim, cur_pos);
@@ -112,26 +175,26 @@ int main(void)
             memcpy(v_cache_slot, v_full, sizeof(f32) * kv_dim);
 
             f32 o_full[2048]; 
+            f32 scale = 1.0f / sqrtf((f32)head_dim);
 
             for (u32 h = 0; h < model.cfg.attention_head_count; h++)
             {
                 u32 kv = h / gqa_group_size;
                 f32 *qh = q_full + h*head_dim;
-                f32 scale = 1.0f / sqrtf((f32)head_dim);
 
                 for (u32 t = 0; t <= cur_pos; t++)
                 {
                     f32 *kh_t = kv_cache_k + (layer_idx * max_seq + t) * kv_dim + kv*head_dim;
-                    scores[t] = vec_dot_f32(qh, kh_t, head_dim) * scale;
+                    attn_scores[t] = vec_dot_f32(qh, kh_t, head_dim) * scale;
                 }
-                softmax_f32(scores, scores, cur_pos + 1);
+                softmax_f32(attn_scores, attn_scores, cur_pos + 1);
 
                 f32 *oh = o_full + h * head_dim;
                 for (u32 i = 0; i < head_dim; i++) oh[i] = 0.0f;
                 for (u32 t = 0; t <= cur_pos; t++)
                 {
                     f32 *vh_t = kv_cache_v + (layer_idx * max_seq + t) * kv_dim + kv*head_dim;
-                    f32 w = scores[t];
+                    f32 w = attn_scores[t];
                     for (u32 i = 0; i < head_dim; i++) oh[i] += w * vh_t[i];
                 }
             }
@@ -148,8 +211,8 @@ int main(void)
             rmsnorm(residual, (f32*)l.ffn_norm.tensor_data, normed_ffn, 2048);
 
 
-            matmul_q8_0((block_q8_0*)l.ffn_gate.tensor_data, l.ffn_gate.dims[0], l.ffn_gate.dims[1], residual, gate);
-            matmul_q8_0((block_q8_0*)l.ffn_up.tensor_data,   l.ffn_up.dims[0],   l.ffn_up.dims[1],   residual, up);
+            matmul_q8_0((block_q8_0*)l.ffn_gate.tensor_data, l.ffn_gate.dims[0], l.ffn_gate.dims[1], normed_ffn, gate);
+            matmul_q8_0((block_q8_0*)l.ffn_up.tensor_data,   l.ffn_up.dims[0],   l.ffn_up.dims[1],   normed_ffn, up);
 
             silu(gate, gate, ffn_dim);
             for (u32 i = 0; i < ffn_dim; i++) gate[i] *= up[i];   // gate now holds silu(gate)*up
@@ -159,8 +222,20 @@ int main(void)
 
             for (u32 i = 0; i < 2048; i++) x[i] = residual[i] + ffn_out[i];
         }
-    }
+        f32 normed_final[2048];
+        if (cur_pos >= prompt_len - 1)
+        {
+            rmsnorm(x, (f32*)model.output_norm.tensor_data, normed_final, 2048);
+            matmul_q8_0((block_q8_0*)model.token_embd.tensor_data, 2048, vocab, normed_final, logits);
+            u32 next_token = argmax(logits, vocab);
 
+            std::print("{}", decode_id(next_token));
+            tokens.push_back(next_token);
+
+        }
+    }
+    std::println("");
+    #endif
 
     UnmapViewOfFile(file_base); 
     CloseHandle(Mapping);

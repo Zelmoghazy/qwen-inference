@@ -471,7 +471,7 @@ void print_tensor_info(std::string_view name, u64 *dims, u32 n_dims, u32 tensor_
 
 bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
 {
-    Profile("GGUF Parser");
+    ZoneScopedN("GGUF Parser");
 
     GGUFHeader *header = Consume(&gguf, GGUFHeader);
     

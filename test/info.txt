@@ -1,0 +1,88 @@
+  0. general.architecture = "qwen2"
+  1. general.type = "model"
+  2. general.name = "Qwen2.5 3B Instruct"
+  3. general.finetune = "Instruct"
+  4. general.basename = "Qwen2.5"
+  5. general.size_label = "3B"
+  6. general.license = "other"
+  7. general.license.name = "qwen-research"
+  8. general.license.link = "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct/blob/main/LICENSE"
+  9. general.base_model.count= 1 (scalar, type=uint32) 
+ 10. general.base_model.0.name = "Qwen2.5 3B"
+ 11. general.base_model.0.organization = "Qwen"
+ 12. general.base_model.0.repo_url = "https://huggingface.co/Qwen/Qwen2.5-3B"
+ 13. general.tags = [2 x string] ("chat", "text-generation")
+ 14. general.languages = [1 x string] ("en")
+ 15. qwen2.block_count= 36 (scalar, type=uint32) 
+ 16. qwen2.context_length= 32768 (scalar, type=uint32) 
+ 17. qwen2.embedding_length= 2048 (scalar, type=uint32) 
+ 18. qwen2.feed_forward_length= 11008 (scalar, type=uint32) 
+ 19. qwen2.attention.head_count= 16 (scalar, type=uint32) 
+ 20. qwen2.attention.head_count_kv= 2 (scalar, type=uint32) 
+ 21. qwen2.rope.freq_base= 1e+06 (scalar, type=float32) 
+ 22. qwen2.attention.layer_norm_rms_epsilon= 1e-06 (scalar, type=float32) 
+ 23. general.file_type= 7 (scalar, type=uint32) 
+ 24. tokenizer.ggml.model = "gpt2"
+ 25. tokenizer.ggml.pre = "qwen2"
+ 26. tokenizer.ggml.tokens = [151936 x string] ("!", """, "#", "$", "%", "&", "'", "(", ...))
+ 27. tokenizer.ggml.token_type = [151936 x int32] (= 1 (scalar, type=int32) , = 1 (scalar, type=int32) , = 1 (scalar, type=int32) , = 1 (scalar, type=int32) , = 1 (scalar, type=int32) , = 1 (scalar, type=int32) , = 1 (scalar, type=int32) , = 1 (scalar, type=int32) , ...)
+ 28. tokenizer.ggml.merges = [151387 x string] ("Ġ Ġ", "ĠĠ ĠĠ", "i n", "Ġ t", "ĠĠĠĠ ĠĠĠĠ", "e r", "ĠĠ Ġ", "o n", ...)
+ 29. tokenizer.ggml.eos_token_id= 151645 (scalar, type=uint32) 
+ 30. tokenizer.ggml.padding_token_id= 151643 (scalar, type=uint32) 
+ 31. tokenizer.ggml.bos_token_id= 151643 (scalar, type=uint32) 
+ 32. tokenizer.ggml.add_bos_token= false (scalar, type=bool) 
+ 33. tokenizer.chat_template = "{%- if tools %}
+    {{- '<|im_start|>system\n' }}
+    {%- if messages[0]['role'] == 'system' %}
+        {{- messages[0]['content'] }}
+    {%- else %}
+        {{- 'You are Qwen, created by Alibaba Cloud. You are a helpful assistant.' }}
+    {%- endif %}
+    {{- "\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>" }}
+    {%- for tool in tools %}
+        {{- "\n" }}
+        {{- tool | tojson }}
+    {%- endfor %}
+    {{- "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n" }}
+{%- else %}
+    {%- if messages[0]['role'] == 'system' %}
+        {{- '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}
+    {%- else %}
+        {{- '<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n' }}
+    {%- endif %}
+{%- endif %}
+{%- for message in messages %}
+    {%- if (message.role == "user") or (message.role == "system" and not loop.first) or (message.role == "assistant" and not message.tool_calls) %}
+        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}
+    {%- elif message.role == "assistant" %}
+        {{- '<|im_start|>' + message.role }}
+        {%- if message.content %}
+            {{- '\n' + message.content }}
+        {%- endif %}
+        {%- for tool_call in message.tool_calls %}
+            {%- if tool_call.function is defined %}
+                {%- set tool_call = tool_call.function %}
+            {%- endif %}
+            {{- '\n<tool_call>\n{"name": "' }}
+            {{- tool_call.name }}
+            {{- '", "arguments": ' }}
+            {{- tool_call.arguments | tojson }}
+            {{- '}\n</tool_call>' }}
+        {%- endfor %}
+        {{- '<|im_end|>\n' }}
+    {%- elif message.role == "tool" %}
+        {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != "tool") %}
+            {{- '<|im_start|>user' }}
+        {%- endif %}
+        {{- '\n<tool_response>\n' }}
+        {{- message.content }}
+        {{- '\n</tool_response>' }}
+        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}
+            {{- '<|im_end|>\n' }}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant\n' }}
+{%- endif %}"
+34. general.quantization_version= 2 (scalar, type=uint32)

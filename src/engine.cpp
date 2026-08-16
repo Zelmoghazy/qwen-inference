@@ -23,6 +23,7 @@ static inline uint32_t fp32_to_bits(float f) {
 
 static inline f32 ggml_compute_fp16_to_fp32(uint16_t h) 
 {
+
     const uint32_t w = (uint32_t) h << 16;
     const uint32_t sign = w & UINT32_C(0x80000000);
     const uint32_t two_w = w + w;
@@ -74,8 +75,6 @@ static inline uint16_t ggml_compute_fp32_to_fp16(float f)
 
 inline f32 f16_to_f32(u16 h)
 {
-    Profile("f16 to f32");
-
     u32 sign = (u32)(h & 0x8000u) << 16;
     u32 exp  = (h >> 10) & 0x1Fu;
     u32 mant =  h        & 0x3FFu;
@@ -114,7 +113,7 @@ inline f32 f16_to_f32(u16 h)
     return f;
 }
 
-inline f32 dot_q8_0_f32(const block_q8_0 *row, u32 n_blocks, const f32 *x)
+f32 dot_q8_0_f32(const block_q8_0 *row, u32 n_blocks, const f32 *x)
 {
     f32 acc = 0.0f;
     for (u32 l = 0; l < n_blocks; l++)
@@ -134,10 +133,12 @@ inline f32 dot_q8_0_f32(const block_q8_0 *row, u32 n_blocks, const f32 *x)
     return acc;
 }
 
-void matmul_q8_0(const block_q8_0 *weight, u32 n_in, u32 n_out, const f32 *input, f32 *output)
+void mat_vec_mul_q8_0(const block_q8_0 *weight, u32 n_in, u32 n_out, const f32 *input, f32 *output)
 {
-    Profile("Matrix Multiplication");
+    ZoneScopedNC("Matrix Multiplication", tracy::Color::Tomato);
+
     assert(n_in % 32 == 0 && "q8_0 rows must be a multiple of the 32-element block size");
+
     u32 blocks_per_row = n_in / 32;
 
     for (u32 row = 0; row < n_out; row++)

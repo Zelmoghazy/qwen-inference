@@ -10,6 +10,11 @@ extern const uint32_t ID_TO_BYTES_OFFSET[];
 
 const char* regex_pattern = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}" "| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
 
+/*  
+    tokenizer.ggml.eos_token_id= 151645 (scalar, type=uint32) 
+    tokenizer.ggml.padding_token_id= 151643 (scalar, type=uint32) 
+    tokenizer.ggml.bos_token_id= 151643 (scalar, type=uint32)  
+*/
 std::vector<std::string> special_tokens = {
     "<|endoftext|>", "<|im_start|>","<|im_end|>","<|object_ref_start|>","<|object_ref_end|>","<|box_start|>","<|box_end|>","<|quad_start|>","<|quad_end|>","<|vision_start|>","<|vision_end|>","<|vision_pad|>","<|image_pad|>","<|video_pad|>", "<tool_call>","</tool_call>","<|fim_prefix|>","<|fim_middle|>","<|fim_suffix|>","<|fim_pad|>","<|repo_name|>","<|file_sep|>"
 };
@@ -208,6 +213,9 @@ std::vector<int> encode_piece(const std::string& raw_utf8_piece)
 
 std::string decode_id(int id) 
 {
+    if(id >= 151643 && id <= 151664){
+        return special_tokens[id-151643];
+    }
     uint32_t start = ID_TO_BYTES_OFFSET[id];
     uint32_t end   = ID_TO_BYTES_OFFSET[id+1];
     return std::string(reinterpret_cast<const char*>(ID_TO_BYTES_BLOB + start), end - start);

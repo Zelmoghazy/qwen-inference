@@ -129,7 +129,7 @@ echo Unknown command: %1
 exit /b 1
 
 :build_release
-cl %CFLAGS% /O2 %INCLUDE_DIRS% %APP_SRC% %SRC% /Fe:%~1.exe /link %LIBRARY_DIRS% %LIBRARIES% %L_FLAGS%
+cl %CFLAGS% /O2 /arch:AVX2 /fp:fast %INCLUDE_DIRS% %APP_SRC% %SRC% /Fe:%~1.exe /link %LIBRARY_DIRS% %LIBRARIES% %L_FLAGS%
 if errorlevel 1 (
     echo -----------------------------------------------------------------
     echo Build failed!
@@ -149,7 +149,7 @@ if errorlevel 1 (
 exit /b 0
 
 :build_profile
-cl %CFLAGS% /O2 /DTRACY_ENABLE %INCLUDE_DIRS% %APP_SRC% %SRC% /Fe:%~1.exe /link %LIBRARY_DIRS% %LIBRARIES% %PROFILE_LIBS% %L_FLAGS%
+cl %CFLAGS% /O2 /arch:AVX2 /fp:fast /DTRACY_ENABLE %INCLUDE_DIRS% %APP_SRC% %SRC% /Fe:%~1.exe /link %LIBRARY_DIRS% %LIBRARIES% %PROFILE_LIBS% %L_FLAGS%
 if errorlevel 1 (
     echo -----------------------------------------------------------------
     echo Profile build failed!

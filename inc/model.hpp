@@ -4,14 +4,15 @@
 
 struct ModelConfig
 {
+    u32 context_length;
     u32 embedding_length;
-    u32 block_count;
+    u32 feed_forward_length;
     u32 attention_head_count;
     u32 attention_head_count_kv;
-    u32 feed_forward_length;
+    u32 block_count;
     u32 alignment = 32;         // if absent, it defaults to 32 bytes
-    f32 rms_epsilon;
     f32 rope_freq;
+    f32 rms_epsilon;
 };
 
 // Tensor infos, which can be used to locate the tensor data.

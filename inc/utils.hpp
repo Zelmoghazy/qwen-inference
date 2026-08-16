@@ -15,15 +15,9 @@
 #include <unordered_map>
 #include <stdexcept>
 
-#define PROFILE 1
-#define LOG 0
+#include "tracy/tracy/Tracy.hpp"
 
-#if PROFILE
-    #include "tracy/tracy/Tracy.hpp"
-    #define Profile(s) ZoneScopedN(s)
-#else
-    #define Profile(s)
-#endif
+#define LOG 1
 
 typedef uint8_t u8;
 typedef int8_t i8;
@@ -35,3 +29,27 @@ typedef float f32;
 typedef double f64;
 
 #define ALIGN_UP(x, y)                  ((((x) + (y) - 1) / (y)) * (y))
+
+struct TracySection
+{
+    explicit TracySection( const char* name ) { Enter( name ); }
+    explicit TracySection( const char* name, uint16_t category ) : idx( TracySectionEnterCategory( category, "%s", name ) ) {}
+    ~TracySection() { Leave(); }
+
+    void Enter( const char* name )
+    {
+        idx = TracySectionEnter( "%s", name );
+    }
+
+    void Leave()
+    {
+        if( idx > 0 )
+        {
+            TracySectionLeave( idx );
+            idx = 0;
+        }
+    }
+
+private:
+    uint32_t idx;
+};

@@ -14,6 +14,7 @@
 #include <string>
 #include <unordered_map>
 #include <stdexcept>
+#include <immintrin.h> 
 
 #include "tracy/tracy/Tracy.hpp"
 
@@ -27,6 +28,9 @@ typedef int64_t i64;
 typedef uint32_t u32;
 typedef float f32;
 typedef double f64;
+
+
+typedef __m256  f32x8;
 
 #define ALIGN_UP(x, y)                  ((((x) + (y) - 1) / (y)) * (y))
 
@@ -85,6 +89,10 @@ private:
     typedef atomic_int atomic_int_t;
 #endif
 
+typedef struct {
+    atomic_int_t locked;
+} spinlock_t;
+
 typedef void (*job_func_t)(void* data);
 
 typedef struct 
@@ -132,3 +140,43 @@ void threadpool_wait(thread_pool_t* pool);
     there is neither pending nor in progress jobs
  */
 bool threadpool_busy(thread_pool_t* pool);
+
+
+
+static inline f32x8 f32x8_zero(void) {
+    return _mm256_setzero_ps();
+}
+static inline f32x8 f32x8_set1(float x) 
+{
+    return _mm256_set1_ps(x);
+}
+
+static inline f32x8 f32x8_load_i8(const int8_t* ptr) 
+{
+    __m128i i8 = _mm_loadl_epi64((const __m128i*)ptr);
+    __m256i i32 = _mm256_cvtepi8_epi32(i8);
+    return _mm256_cvtepi32_ps(i32);
+}
+
+static inline f32x8 f32x8_load(const float *ptr) 
+{
+    return _mm256_loadu_ps(ptr);
+}
+
+static inline f32x8 f32x8_madd(f32x8 a, f32x8 b, f32x8 c) 
+{
+    // a * b + c
+    return _mm256_fmadd_ps(a, b, c);
+}
+
+static inline float f32x8_sum(f32x8 v) 
+{
+    __m128 lo = _mm256_castps256_ps128(v);
+    __m128 hi = _mm256_extractf128_ps(v, 1);
+    __m128 sum4 = _mm_add_ps(lo, hi);
+    __m128 shuf = _mm_shuffle_ps(sum4, sum4, _MM_SHUFFLE(2, 3, 0, 1));
+    __m128 sums = _mm_add_ps(sum4, shuf);
+    shuf = _mm_movehl_ps(shuf, sums);
+    sums = _mm_add_ss(sums, shuf);
+    return _mm_cvtss_f32(sums);
+}

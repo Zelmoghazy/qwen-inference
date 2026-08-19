@@ -13,21 +13,85 @@ struct matmul_chunk_t
 {
     const block_q8_0 *weight;
     u32 blocks_per_row;
-    u32 row_start, row_end;
+    u32 row_start;
+    u32 row_end;
     const f32 *input;
     f32 *output;
 };
 
+#if 1
 void matmul_chunk_job(void *data)
 {
     ZoneScopedNC("Matmul Chunk", tracy::Color::Orange);
+
+    matmul_chunk_t *c = (matmul_chunk_t*)data;
+
+    for (u32 row = c->row_start; row < c->row_end; row++)
+    {
+        const block_q8_0 *row_blocks = c->weight + (u64)row * c->blocks_per_row;
+        f32x8 acc_vec = f32x8_zero();
+
+        for (u32 l = 0; l < c->blocks_per_row; l++)
+        {
+            const f32   delta   = ggml_compute_fp16_to_fp32(row_blocks[l].d);
+            const f32x8 delta_v = f32x8_set1(delta);
+
+            const int8_t *qs = row_blocks[l].qs;
+            const f32    *xb = c->input + (u64)l * 32;
+
+            f32x8 q0 = f32x8_load_i8(qs +  0);
+            f32x8 q1 = f32x8_load_i8(qs +  8);
+            f32x8 q2 = f32x8_load_i8(qs + 16);
+            f32x8 q3 = f32x8_load_i8(qs + 24);
+
+            f32x8 x0 = f32x8_load(xb +  0);
+            f32x8 x1 = f32x8_load(xb +  8);
+            f32x8 x2 = f32x8_load(xb + 16);
+            f32x8 x3 = f32x8_load(xb + 24);
+
+            f32x8 b = f32x8_zero();
+            b = f32x8_madd(q0, x0, b);
+            b = f32x8_madd(q1, x1, b);
+            b = f32x8_madd(q2, x2, b);
+            b = f32x8_madd(q3, x3, b);
+
+            acc_vec = f32x8_madd(b, delta_v, acc_vec);
+        }
+
+        c->output[row] = f32x8_sum(acc_vec);
+    }
+}
+#endif
+
+#if 0
+void matmul_chunk_job(void *data)
+{
+    ZoneScopedNC("Matmul Chunk", tracy::Color::Orange);
+
     matmul_chunk_t *c = (matmul_chunk_t*)data;
     for (u32 row = c->row_start; row < c->row_end; row++)
     {
         const block_q8_0 *row_blocks = c->weight + (u64)row * c->blocks_per_row;
-        c->output[row] = dot_q8_0_f32(row_blocks, c->blocks_per_row, c->input);
+        f32 acc = 0.0f;
+
+        for (u32 l = 0; l < c->blocks_per_row; l++)
+        {
+            f32 delta = ggml_compute_fp16_to_fp32(row_blocks[l].d);
+
+            const int8_t *qs = row_blocks[l].qs;
+            const f32    *xb = c->input + (u64)l * 32;
+
+            f32 block_acc = 0.0f;
+            for (u32 i = 0; i < 32; i++){
+                block_acc += (f32)qs[i] * xb[i];
+            }
+
+            acc += block_acc * delta;
+        }
+        c->output[row] = acc;
     }
 }
+#endif
 
 void matmul_q8_0_threaded(thread_pool_t *pool, const block_q8_0 *weight,
                            u32 n_in, u32 n_out, const f32 *input, f32 *output)

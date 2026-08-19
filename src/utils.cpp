@@ -149,6 +149,64 @@ int get_core_count(void)
     #endif
 }
 
+int atomic_exchange(atomic_int_t* var, int value)
+{
+#ifdef _WIN32
+    return InterlockedExchange(var, value);
+#else
+    return atomic_exchange(var, value);
+#endif
+}
+
+int atomic_cas(atomic_int_t* var, int expected, int desired)
+{
+#ifdef _WIN32
+    return InterlockedCompareExchange(var, desired, expected) == expected;
+#else
+    int e = expected;
+    return atomic_compare_exchange_strong(var, &e, desired);
+#endif
+}
+
+void cpu_relax(void)
+{
+#ifdef _WIN32
+    YieldProcessor(); YieldProcessor(); YieldProcessor(); YieldProcessor();
+#elif defined(__x86_64__) || defined(__i386__)
+    _mm_pause();
+#else
+    /* fall back to compiler barrier */
+    __asm__ __volatile__("" ::: "memory");
+#endif
+}
+
+void os_yield(void)
+{
+#ifdef _WIN32
+    SwitchToThread();        /* yield to a thread on the same CPU */
+#else
+    sched_yield();
+#endif
+}
+void spin_init(spinlock_t* s)    
+{ 
+    atomic_exchange(&s->locked, 0); 
+}
+
+void spin_lock(spinlock_t* s)
+{
+    for (;;) {
+        if (!atomic_exchange(&s->locked, 1))
+            return;
+        while (atomic_load_int(&s->locked))
+            cpu_relax();
+    }
+}
+
+void spin_unlock(spinlock_t* s)
+{
+    atomic_exchange(&s->locked, 0);
+}
 thread_func_ret_t thread_loop(thread_func_param_t param)
 {
     thread_pool_t* pool = (thread_pool_t*)param;
@@ -306,3 +364,4 @@ bool threadpool_busy(thread_pool_t* pool)
 
     return busy;
 }
+

@@ -19,7 +19,7 @@ set L_FLAGS=/SUBSYSTEM:CONSOLE
 set APP_SRC=..\src\main.cpp
 set TEST_SRC=..\test\test.cpp 
 
-set SRC=..\src\tokenizer.cpp ..\src\qwen_tables.cpp ..\src\gguf.cpp ..\src\engine.cpp ..\src\arena.c
+set SRC=..\src\tokenizer.cpp ..\src\qwen_tables.cpp ..\src\gguf.cpp ..\src\engine.cpp ..\src\utils.cpp ..\src\arena.c
 
 set INCLUDE_DIRS=/I..\inc /I..\external\inc\
 set LIBRARY_DIRS=/LIBPATH:..\external\lib\

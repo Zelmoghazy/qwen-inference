@@ -25,6 +25,12 @@
     },
     {
         "directory": "C:\\Users\\zezo_\\Desktop\\Programming\\qwen\\build",
+        "command": "D:\\Programming\\Software\\msvc\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe /Zi /EHsc /D_AMD64_ /W4 /MD /nologo /utf-8 /std:c++latest /arch:AVX /I..\\inc /I..\\external\\inc\\ /I\"D:\\Programming\\Software\\msvc\\VC\\Tools\\MSVC\\14.50.35717\\include\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\um\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\winrt\" /O2 /c ..\\src\\utils.cpp",
+        "file": "..\\src\\utils.cpp",
+        "output": "utils.obj"
+    },
+    {
+        "directory": "C:\\Users\\zezo_\\Desktop\\Programming\\qwen\\build",
         "command": "D:\\Programming\\Software\\msvc\\VC\\Tools\\MSVC\\14.50.35717\\bin\\Hostx64\\x64\\cl.exe /Zi /EHsc /D_AMD64_ /W4 /MD /nologo /utf-8 /std:c++latest /arch:AVX /I..\\inc /I..\\external\\inc\\ /I\"D:\\Programming\\Software\\msvc\\VC\\Tools\\MSVC\\14.50.35717\\include\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\shared\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\um\" /I\"D:\\Programming\\Software\\msvc\\Windows Kits\\10\\Include\\10.0.26100.0\\winrt\" /O2 /c ..\\src\\arena.c",
         "file": "..\\src\\arena.c",
         "output": "arena.obj"

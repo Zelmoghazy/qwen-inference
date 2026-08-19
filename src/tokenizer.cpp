@@ -47,7 +47,7 @@ std::string normalize_nfc(const std::string& input)
     utf8proc_uint8_t* normalized = utf8proc_NFC(reinterpret_cast<const utf8proc_uint8_t*>(input.c_str()));
 
     if (!normalized){
-        throw std::runtime_error("UTF-8 normalization failed");
+        // ?
     }
 
     std::string result(reinterpret_cast<const char*>(normalized));
@@ -69,7 +69,6 @@ std::vector<std::string> regex_split(const std::string& text)
     {
         PCRE2_UCHAR buf[256];
         pcre2_get_error_message(errorcode, buf, sizeof(buf));
-        throw std::runtime_error("regex compile failed: " + std::string(reinterpret_cast<char*>(buf)));
     }
 
     pcre2_match_data* match_data = pcre2_match_data_create_from_pattern(re, nullptr);

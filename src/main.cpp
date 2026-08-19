@@ -9,365 +9,6 @@ extern "C"{
     #include "arena.h"
 }
 
-#define KB(n)                           (((u64)(n)) << 10)
-#define MB(n)                           (((u64)(n)) << 20)
-#define GB(n)                           (((u64)(n)) << 30)
-
-#ifdef _WIN32
-    typedef HANDLE thread_handle_t;
-    typedef DWORD (WINAPI *thread_func_t)(LPVOID);
-    typedef LPVOID thread_func_param_t;
-    typedef DWORD thread_func_ret_t;
-    typedef CONDITION_VARIABLE cond_handle_t;
-    typedef CRITICAL_SECTION mutex_handle_t;
-    typedef HANDLE pipe_handle;
-    typedef HANDLE event_handle;
-    typedef volatile LONG atomic_int_t;
-#else
-    typedef pthread_t thread_handle_t;
-    typedef void* (*thread_func_t)(void*);
-    typedef void* thread_func_param_t;
-    typedef void* thread_func_ret_t;
-    typedef pthread_mutex_t mutex_handle_t;
-    typedef pthread_cond_t cond_handle_t;
-    typedef int pipe_handle;
-    typedef struct {
-        pthread_mutex_t mutex;
-        pthread_cond_t cond;
-        bool signaled;
-    }event_handle;
-    typedef atomic_int atomic_int_t;
-#endif
-
-typedef void (*job_func_t)(void* data);
-
-typedef struct 
-{
-    job_func_t func;
-    void* data;
-}job_t;
-
-typedef struct 
-{
-    std::vector<thread_handle_t> threads;
-    std::vector<job_t> jobs;
-
-    mutex_handle_t queue_mutex;
-    cond_handle_t  work_available;
-    cond_handle_t  idle_condition;
-
-    bool should_terminate;
-    atomic_int_t active_jobs;
-} thread_pool_t;
-
-void atomic_inc(atomic_int_t* var)
-{
-    #ifdef _WIN32
-        InterlockedIncrement(var);
-    #else
-        atomic_fetch_add(var, 1);
-    #endif
-}
-
-void atomic_dec(atomic_int_t* var)
-{
-    #ifdef _WIN32
-        InterlockedDecrement(var);
-    #else
-        atomic_fetch_sub(var, 1);
-    #endif
-}
-
-int atomic_load_int(atomic_int_t* var)
-{
-    #ifdef _WIN32
-        return InterlockedCompareExchange(var, 0, 0);  // Atomic read trick
-    #else
-        return atomic_load(var);
-    #endif
-}
-
-thread_handle_t create_thread(thread_func_t func, thread_func_param_t data)
-{
-    #ifdef _WIN32
-        return CreateThread(NULL,  // security attribute -no idea- NULL means default 
-                            0,     // stack size zero means default size 
-                            func,  // pointer to the function to be executed by the thread
-                            data,  // pointer to the params passed to the thread
-                            0,     // run immediately
-                            NULL); // dont return identifier
-    #else
-        pthread_t thread;
-        pthread_create(&thread, NULL, func, data);
-        return thread;
-    #endif
-}
-
-void join_thread(thread_handle_t thread) 
-{
-    #ifdef _WIN32
-        WaitForSingleObject(thread, INFINITE);  // return only when thread is signaled
-        CloseHandle(thread);
-    #else
-        pthread_join(thread, NULL);
-    #endif
-}
-
-void mutex_init(mutex_handle_t* mutex)
-{
-    #ifdef _WIN32
-        InitializeCriticalSection(mutex);
-    #else
-        pthread_mutex_init(mutex, NULL);
-    #endif
-}
-
-void mutex_destroy(mutex_handle_t* mutex)
-{
-    #ifdef _WIN32
-        DeleteCriticalSection(mutex);
-    #else
-        pthread_mutex_destroy(mutex);
-    #endif
-}
-
-void mutex_lock(mutex_handle_t* mutex)
-{
-    #ifdef _WIN32
-        EnterCriticalSection(mutex);
-    #else
-        pthread_mutex_lock(mutex);
-    #endif
-}
-
-void mutex_unlock(mutex_handle_t* mutex)
-{
-    #ifdef _WIN32
-        LeaveCriticalSection(mutex);
-    #else
-        pthread_mutex_unlock(mutex);
-    #endif
-}
-
-void cond_init(cond_handle_t* cond)
-{
-    #ifdef _WIN32
-        InitializeConditionVariable(cond);
-    #else
-        pthread_cond_init(cond, NULL);
-    #endif
-}
-
-void cond_destroy(cond_handle_t* cond)
-{
-    #ifdef _WIN32
-        (void) cond; // no cleanup ?
-    #else
-        pthread_cond_destroy(cond);
-    #endif
-}
-
-void cond_wait(cond_handle_t* cond, mutex_handle_t* mutex)
-{
-    #ifdef _WIN32
-        SleepConditionVariableCS(cond, mutex, INFINITE);
-    #else
-        pthread_cond_wait(cond, mutex);
-    #endif
-}
-
-void cond_signal(cond_handle_t* cond)
-{
-    #ifdef _WIN32
-        WakeConditionVariable(cond);
-    #else
-        pthread_cond_signal(cond);
-    #endif
-}
-
-void cond_broadcast(cond_handle_t* cond)
-{
-    #ifdef _WIN32
-        /* 
-            The WakeAllConditionVariable wakes all waiting threads
-            while the WakeConditionVariable wakes only a single thread. 
-        */
-        WakeAllConditionVariable(cond);
-    #else
-        pthread_cond_broadcast(cond);
-    #endif
-}
-
-int get_core_count(void) 
-{
-    #ifdef _WIN32
-        SYSTEM_INFO sysinfo;
-        GetSystemInfo(&sysinfo);
-        return sysinfo.dwNumberOfProcessors;
-    #else
-        return sysconf(_SC_NPROCESSORS_ONLN);
-    #endif
-}
-
-thread_func_ret_t thread_loop(thread_func_param_t param)
-{
-    thread_pool_t* pool = (thread_pool_t*)param;
-
-    job_t job = {0};
-
-    while (true)
-    {
-        mutex_lock(&pool->queue_mutex);
-        {
-            /*
-                sleep as long as there are no pending jobs
-             */
-            while (pool->jobs.empty() &&
-                   !pool->should_terminate)
-            {
-                cond_wait(&pool->work_available, &pool->queue_mutex);
-            }
-
-            if (pool->should_terminate)
-            {
-                mutex_unlock(&pool->queue_mutex);
-                return 0;
-            }
-            /*
-                pull the job from the queue 
-             */
-            job = pool->jobs.back();
-            pool->jobs.pop_back();
-        }
-        mutex_unlock(&pool->queue_mutex);
-
-        atomic_inc(&pool->active_jobs);
-        job.func(job.data);
-        atomic_dec(&pool->active_jobs);
-
-        mutex_lock(&pool->queue_mutex);
-        {
-            /*
-                No jobs left
-            */
-            if (pool->jobs.empty() &&
-                pool->active_jobs == 0)
-            {
-                cond_broadcast(&pool->idle_condition);
-            }
-        }
-        mutex_unlock(&pool->queue_mutex);
-    }
-
-    return 0;
-}
-
-thread_pool_t* threadpool_create(void)
-{
-    thread_pool_t* pool = new thread_pool_t();
-    if (!pool) return nullptr;
-
-    pool->should_terminate = false;
-    pool->active_jobs = 0;
-
-    mutex_init(&pool->queue_mutex);
-
-    cond_init(&pool->work_available);
-    cond_init(&pool->idle_condition);
-
-    uint32_t num_threads = get_core_count();
-    pool->threads.reserve(num_threads);
-
-    for (uint32_t i = 0; i < num_threads; ++i) {
-        thread_handle_t thread = create_thread(thread_loop, (thread_func_param_t)pool);
-        pool->threads.push_back(thread);
-    }
-
-    return pool;
-}
-
-void threadpool_destroy(thread_pool_t* pool)
-{
-    if (!pool) return;
-
-    mutex_lock(&pool->queue_mutex);
-    {
-        pool->should_terminate = true;
-    }
-    mutex_unlock(&pool->queue_mutex);
-
-    cond_broadcast(&pool->work_available);
-
-    for (size_t i = 0; i < pool->threads.size(); ++i) {
-        join_thread(pool->threads[i]);
-    }
-
-    mutex_destroy(&pool->queue_mutex);
-
-    cond_destroy(&pool->work_available);
-    cond_destroy(&pool->idle_condition);
-
-    delete pool;
-    // pool->threads and pool->jobs (std::vector) free themselves automatically
-}
-
-void threadpool_queue_job(thread_pool_t* pool, job_func_t func, void* data)
-{
-    job_t job = { func, data };
-
-    mutex_lock(&pool->queue_mutex);
-    {
-        pool->jobs.push_back(job);
-    }
-    mutex_unlock(&pool->queue_mutex);
-
-    // notify a thread to pick up the job
-    cond_signal(&pool->work_available);
-}
-
-void threadpool_queue_jobs_batch(thread_pool_t* pool, const job_t* jobs, int count)
-{
-    mutex_lock(&pool->queue_mutex);
-    {
-        pool->jobs.insert(pool->jobs.end(), jobs, jobs + count);
-    }
-    mutex_unlock(&pool->queue_mutex);
-
-    cond_broadcast(&pool->work_available); // wake all workers once
-}
-
-void threadpool_wait(thread_pool_t* pool)
-{
-    mutex_lock(&pool->queue_mutex);
-    {
-        while (!pool->jobs.empty() ||
-                pool->active_jobs > 0)
-        {
-            cond_wait(&pool->idle_condition, &pool->queue_mutex);
-        }
-    }
-    mutex_unlock(&pool->queue_mutex);
-}
-
-/*
-    there is neither pending nor in progress jobs
- */
-bool threadpool_busy(thread_pool_t* pool)
-{
-    bool busy = false;
-
-    mutex_lock(&pool->queue_mutex);
-    {
-        busy = (!pool->jobs.empty() ||
-                pool->active_jobs > 0);
-    }
-    mutex_unlock(&pool->queue_mutex);
-
-    return busy;
-}
-
-/* ---------------------------------------------------------------- */
-
 struct matmul_chunk_t 
 {
     const block_q8_0 *weight;
@@ -391,22 +32,26 @@ void matmul_chunk_job(void *data)
 void matmul_q8_0_threaded(thread_pool_t *pool, const block_q8_0 *weight,
                            u32 n_in, u32 n_out, const f32 *input, f32 *output)
 {
-    ZoneScopedNC("Matrix Multiplication Threaded", tracy::Color::Tomato);
+    ZoneScopedNC("Matrix Multiplication Multithreaded", tracy::Color::Tomato);
     assert(n_in % 32 == 0);
     u32 blocks_per_row = n_in / 32;
 
     u32 num_threads = (u32)pool->threads.size();
-    u32 rows_per_chunk = (n_out + num_threads - 1) / num_threads;
 
-    // sized once per call; no growth reallocation since capacity == num_threads worst case
+    const u32 chunks_per_thread = 8;
+    u32 num_chunks = num_threads * chunks_per_thread;
+    u32 rows_per_chunk = (n_out + num_chunks - 1) / num_chunks;
+
     static thread_local std::vector<matmul_chunk_t> chunks;
     static thread_local std::vector<job_t> jobs;
+
     chunks.clear();
     jobs.clear();
-    chunks.reserve(num_threads);
-    jobs.reserve(num_threads);
+    
+    chunks.reserve(num_chunks);
+    jobs.reserve(num_chunks);
 
-    for (u32 t = 0; t < num_threads; t++)
+    for (u32 t = 0; t < num_chunks; t++)
     {
         u32 start = t * rows_per_chunk;
         u32 end   = (start + rows_per_chunk < n_out) ? start + rows_per_chunk : n_out;
@@ -417,7 +62,7 @@ void matmul_q8_0_threaded(thread_pool_t *pool, const block_q8_0 *weight,
     }
 
     threadpool_queue_jobs_batch(pool, jobs.data(), (int)jobs.size());
-    threadpool_wait(pool); 
+    threadpool_wait(pool);
 }
 
 void silu(const f32 *input, f32 *output, u32 size)
@@ -446,50 +91,63 @@ void rope(f32 *vec, u32 head_dim, u32 pos, f32 theta_base)
     u32 half = head_dim / 2;
     for (u32 i = 0; i < half; i++)
     {
-        f32 freq = 1.0f / powf(theta_base, (2.0f * i) / head_dim);
-        f32 angle = pos * freq;
-        f32 c = cosf(angle), s = sinf(angle);
-        f32 x0 = vec[i], x1 = vec[i + half];
-        vec[i]        = x0 * c - x1 * s;
-        vec[i + half] = x0 * s + x1 * c;
+        f32 freq        = 1.0f / powf(theta_base, (2.0f * i) / head_dim);
+        f32 angle       = pos * freq;
+        f32 c           = cosf(angle);
+        f32 s           = sinf(angle);
+        f32 x0          = vec[i];
+        f32 x1          = vec[i + half];
+        vec[i]          = x0 * c - x1 * s;
+        vec[i + half]   = x0 * s + x1 * c;
     }
 }
 
 f32 vec_dot_f32(const f32 *a, const f32 *b, u32 n)
 {
     f32 sum = 0.0f;
-    for (u32 i = 0; i < n; i++) sum += a[i] * b[i];
+    for (u32 i = 0; i < n; i++){
+        sum += a[i] * b[i];
+    } 
     return sum;
 }
 
 void softmax_f32(const f32 *input, f32 *output, u32 n)
 {
+    // softmax is invariant to subtraction of a constant
     f32 max_val = input[0];
-    for (u32 i = 1; i < n; i++) if (input[i] > max_val) max_val = input[i];
-
+    for (u32 i = 1; i < n; i++){
+        if (input[i] > max_val){
+            max_val = input[i];
+        } 
+    } 
+    // subtracting x_max from all x_i ensures it doesnt overflow
     f32 sum = 0.0f;
     for (u32 i = 0; i < n; i++)
     {
         output[i] = expf(input[i] - max_val);
         sum += output[i];
     }
-    for (u32 i = 0; i < n; i++) output[i] /= sum;
+    for (u32 i = 0; i < n; i++){
+        output[i] /= sum;
+    } 
 }
 
+/* Just take the highest prob, very repetitive */
 u32 argmax(const f32 *logits, u32 n)
 {
     u32 best = 0;
     f32 best_val = logits[0];
     for (u32 i = 1; i < n; i++)
     {
-        if (logits[i] > best_val) { best_val = logits[i]; best = i; }
+        if (logits[i] > best_val) { 
+            best_val = logits[i]; 
+            best = i; 
+        }
     }
     return best;
 }
 
-
-std::string build_chat_prompt(const std::string &system_prompt,
-                               const std::string &user_prompt)
+std::string build_chat_prompt(const std::string &system_prompt, const std::string &user_prompt)
 {
     std::string p;
     p += "<|im_start|>system\n" + system_prompt + "<|im_end|>\n";
@@ -512,10 +170,10 @@ int main(void)
                                   "\\Qwen2.5-3B-Instruct-GGUF\\Qwen2.5-3B-Instruct-Q8_0.gguf",
                                   GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE,
                                   0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
-                                  LARGE_INTEGER size;
-                                  GetFileSizeEx(File, &size);
-            
-                                  HANDLE Mapping = CreateFileMappingA(File, 0, PAGE_READONLY, 0, 0, 0);
+        LARGE_INTEGER size;
+        GetFileSizeEx(File, &size);
+
+        HANDLE Mapping = CreateFileMappingA(File, 0, PAGE_READONLY, 0, 0, 0);
         
         Data gguf;
         u8 *file_base = (u8 *)MapViewOfFile(Mapping, FILE_MAP_READ, 0, 0, 0);
@@ -540,28 +198,31 @@ int main(void)
         
         u32 d_model         = model.cfg.embedding_length;                      // 2048
         u32 n_layers        = model.cfg.block_count;                           // 36
-        u32 head_dim        = model.cfg.embedding_length / model.cfg.attention_head_count;
+        u32 head_dim        = model.cfg.embedding_length / model.cfg.attention_head_count; // dk == dv
         u32 kv_dim          = model.cfg.attention_head_count_kv * head_dim;    // 256
         u32 gqa_group_size  = model.cfg.attention_head_count / model.cfg.attention_head_count_kv; // 8
         u32 max_seq         = d_model;
         u32 ffn_dim         = model.cfg.feed_forward_length;
         u32 vocab           = model.token_embd.dims[1];
-        f32 scale           = 1.0f / sqrtf((f32)head_dim);
+        f32 scale           = 1.0f / sqrtf((f32)head_dim);  // 1 / sqrt(d_k)
         
+        f32 *normed_attn    = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
+        
+        f32 *q_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
+        f32 *k_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * kv_dim);    
+        f32 *v_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * kv_dim);
+
         f32 *kv_cache_k     = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * n_layers * max_seq * kv_dim);
         f32 *kv_cache_v     = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * n_layers * max_seq * kv_dim);
+        
+        f32 *o_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
         
         f32 *attn_scores    = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * max_seq);
         f32 *gate           = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * ffn_dim);
         f32 *up             = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * ffn_dim);
         f32 *logits         = (f32*)ARENA_ALLOC(scratch_arena,sizeof(f32) * vocab);
         
-        f32 *q_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
-        f32 *k_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * kv_dim);    
-        f32 *v_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * kv_dim);
-        f32 *o_full         = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
         
-        f32 *normed_attn    = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
         f32 *attn_out       = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
         
         f32 *residual       = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
@@ -572,13 +233,13 @@ int main(void)
         f32 *x              = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * d_model);    
     parse.Leave();
         
-    TracySection promp_tokenize("Promp Tokenization");
+    TracySection tokenization("Prompt Tokenization");
         init_tokenizer(); 
         std::string prompt = build_chat_prompt(
             "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
-            "Give me a python script to plot a sine function."
+            "Give me a Rust program the implements a very simple shell."
         );
-        std::vector<int> tokens =  encode(prompt);
+        std::vector<int> tokens = encode(prompt);
         std::println("{}",tokens);
 
         for(int token: tokens){
@@ -586,8 +247,8 @@ int main(void)
         }    
 
         u32 prompt_len = (u32)tokens.size();
-        u32 max_new_tokens = 200;
-    promp_tokenize.Leave();
+        u32 max_new_tokens = 1000;
+    tokenization.Leave();
     
 
     #if 1
@@ -612,18 +273,18 @@ int main(void)
             /* ------------------------------------- */
             TracySection attention("Attention");
                 
-                mat_vec_mul_q8_0((block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], normed_attn, q_full);
+                matmul_q8_0_threaded(pool,(block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], normed_attn, q_full);
                 for (u32 i = 0; i < d_model; i++) {
                     q_full[i] += ((f32*)l.attn_q_bias.tensor_data)[i];
                 }
 
                 mat_vec_mul_q8_0((block_q8_0*)l.attn_k.tensor_data, l.attn_k.dims[0], l.attn_k.dims[1], normed_attn, k_full);
-                for (u32 i = 0; i < 256; i++){
+                for (u32 i = 0; i < kv_dim; i++){
                     k_full[i] += ((f32*)l.attn_k_bias.tensor_data)[i];
                 }
 
                 mat_vec_mul_q8_0((block_q8_0*)l.attn_v.tensor_data, l.attn_v.dims[0], l.attn_v.dims[1],  normed_attn, v_full);
-                for (u32 i = 0; i < 256; i++){
+                for (u32 i = 0; i < kv_dim; i++){
                     v_full[i] += ((f32*)l.attn_v_bias.tensor_data)[i];
                 }
                 
@@ -657,21 +318,23 @@ int main(void)
                         softmax_f32(attn_scores, attn_scores, cur_pos + 1);
     
                         f32 *oh = o_full + h * head_dim;
-                        for (u32 i = 0; i < head_dim; i++) oh[i] = 0.0f;
+                        for (u32 i = 0; i < head_dim; i++){
+                            oh[i] = 0.0f;
+                        } 
                         for (u32 t = 0; t <= cur_pos; t++)
                         {
                             f32 *vh_t = kv_cache_v + (layer_idx * max_seq + t) * kv_dim + kv*head_dim;
                             f32 w = attn_scores[t];
-                            for (u32 i = 0; i < head_dim; i++)
-                            {
+                            for (u32 i = 0; i < head_dim; i++){
                                 oh[i] += w * vh_t[i];
                             }
                         }
                     }
                 }
                 
-                mat_vec_mul_q8_0((block_q8_0*)l.attn_output.tensor_data, l.attn_output.dims[0], l.attn_output.dims[1], o_full, attn_out);
-
+                matmul_q8_0_threaded(pool,(block_q8_0*)l.attn_output.tensor_data, l.attn_output.dims[0], l.attn_output.dims[1], o_full, attn_out);
+                
+                // update embeddings
                 for (u32 i = 0; i < d_model; i++){
                     residual[i] = x[i] + attn_out[i]; 
                 }
@@ -709,8 +372,9 @@ int main(void)
                 rmsnorm(x, (f32*)model.output_norm.tensor_data, normed_final, d_model, model.cfg.rms_epsilon);
                 matmul_q8_0_threaded(pool,(block_q8_0*)model.token_embd.tensor_data, d_model, vocab, normed_final, logits);
                 u32 next_token = argmax(logits, vocab);
-                if (next_token == 151645 || next_token == 151643)
+                if (next_token == 151645 || next_token == 151643){
                     break;
+                }
                 std::print("{}", decode_id(next_token));
                 tokens.push_back(next_token);
             }

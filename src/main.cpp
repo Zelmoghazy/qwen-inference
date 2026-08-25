@@ -587,6 +587,11 @@ struct matmul_chunk_t
     u32 n_out;
 };
 
+#define BLOCK_IN_MAT(base, row, num_cols, block, block_size) \
+    ((base) + (u64)(row) * (num_cols) + (u64)(block) * (block_size))
+    
+#define CEIL_DIV(x, y)                  (((x) + (y) - 1) / (y))
+
 void matmul_chunk_job(void *data)
 {
     ZoneScopedNC("Matmul Chunk", tracy::Color::Orange);
@@ -603,13 +608,14 @@ void matmul_chunk_job(void *data)
             acc[tok] = f32x8_zero();
         }
 
-        for (u32 l = 0; l < c->blocks_per_row; l++)
+        for (u32 block = 0; block < c->blocks_per_row; block++)
         {
-            const f32   delta   = ggml_compute_fp16_to_fp32(row_blocks[l].d);
+            const f32   delta   = ggml_compute_fp16_to_fp32(row_blocks[block].d);
             const f32x8 delta_v = f32x8_set1(delta);
 
-            const int8_t *qs = row_blocks[l].qs;
+            const int8_t *qs = row_blocks[block].qs;
             
+            /* load the entire block of weights */
             f32x8 q0 = f32x8_load_i8(qs +  0);
             f32x8 q1 = f32x8_load_i8(qs +  8);
             f32x8 q2 = f32x8_load_i8(qs + 16);
@@ -617,7 +623,7 @@ void matmul_chunk_job(void *data)
 
             for (u32 tok = 0; tok < c->n_seq; tok++)
             {
-                const f32 *xb = c->input + (u64)tok * c->n_in + (u64)l * 32;
+                const f32 *xb = BLOCK_IN_MAT(c->input, tok, c->n_in, block, 32);
 
                 f32x8 x0 = f32x8_load(xb +  0);
                 f32x8 x1 = f32x8_load(xb +  8);
@@ -640,7 +646,6 @@ void matmul_chunk_job(void *data)
     }
 }
 
-#define CEIL_DIV(x, y)                  (((x) + (y) - 1) / (y))
 
 void matmul_q8_0_threaded(thread_pool_t *pool, const block_q8_0 *weight,
                            u32 n_in, u32 n_out,const f32 *input,u32 n_seq, f32 *output)
@@ -701,6 +706,8 @@ void rmsnorm(const f32 *x, const f32 *weight, f32 *out, u32 n, f32 eps)
     }
 }
 
+
+// rotate half instead of each pair
 void rope(f32 *vec, u32 head_dim, u32 pos, f32 theta_base)
 {
     u32 half = head_dim / 2;
@@ -865,6 +872,20 @@ struct ModelContext
 };
 
 #if 1
+
+#define KV_AT(base, layer, pos, max_seq, stride) \
+    ((base) + ((u64)(layer) * (u64)(max_seq) + (u64)(pos)) * (u64)(stride))
+
+#define KV_K_AT(ctx,layer,pos) KV_AT((ctx).kv_cache_k, (layer), (pos), (ctx).max_seq, (ctx).kv_dim)
+#define KV_V_AT(ctx,layer,pos) KV_AT((ctx).kv_cache_v, (layer), (pos), (ctx).max_seq, (ctx).kv_dim)
+
+#define KV_HEAD_K(ctx, layer, pos, kv_head) \
+    (KV_K_AT((ctx), (layer), (pos)) + (u64)(kv_head) * (u64)(ctx).head_dim)
+
+#define KV_HEAD_V(ctx, layer, pos, kv_head) \
+    (KV_V_AT((ctx), (layer), (pos)) + (u64)(kv_head) * (u64)(ctx).head_dim)
+
+
 int main(void)
 {
     TracySection init("Initialization");
@@ -889,7 +910,7 @@ int main(void)
         
         Data gguf(file_base, static_cast<i64>(size.QuadPart));
 
-        arena_t *scratch_arena = arena_reserve(MB(500));
+        arena_t *scratch_arena = arena_reserve(MB(500));// check if enough
         thread_pool_t *pool = threadpool_create();
 
         init_tokenizer(); 
@@ -904,7 +925,7 @@ int main(void)
     TracySection tokenization("Prompt Tokenization");
         std::string prompt = build_chat_prompt(
             "You are Qwen, created by Alibaba Cloud. You are a helpful assistant.",
-            "What do you know about egypt ?"
+            "Generate a python script that generates that plots data from an excel file."
         );
         u32 max_new_tokens = 10000;
 
@@ -935,12 +956,18 @@ int main(void)
         arena_checkpoint_t *cp = arena_save(scratch_arena);
 
         u32 n_tok               = prompt_len;
-        f32 *x_batch            = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok *  ctx.d_model);
+        // seq * d_model
+        f32 *x_batch            = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
         f32 *normed_attn_batch  = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
+        // seq * dk * h
         f32 *q_batch            = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
+        // seq * dk * kv_h
         f32 *k_batch            = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.kv_dim);
+        // seq * dv * kv_h
         f32 *v_batch            = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.kv_dim);
+        // seq * dv * h
         f32 *o_batch            = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
+
         f32 *attn_out_batch     = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
         f32 *residual_batch     = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
         f32 *normed_ffn_batch   = (f32*)ARENA_ALLOC(scratch_arena, sizeof(f32) * n_tok * ctx.d_model);
@@ -963,79 +990,79 @@ int main(void)
             RMSNorm1.Leave();
 
             TracySection attention("Prefill Attention");
-            matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], normed_attn_batch, n_tok, q_batch);
-            matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_k.tensor_data, l.attn_k.dims[0], l.attn_k.dims[1], normed_attn_batch, n_tok, k_batch);
-            matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_v.tensor_data, l.attn_v.dims[0], l.attn_v.dims[1], normed_attn_batch, n_tok, v_batch);
+                matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_q.tensor_data, l.attn_q.dims[0], l.attn_q.dims[1], normed_attn_batch, n_tok, q_batch);
+                matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_k.tensor_data, l.attn_k.dims[0], l.attn_k.dims[1], normed_attn_batch, n_tok, k_batch);
+                matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_v.tensor_data, l.attn_v.dims[0], l.attn_v.dims[1], normed_attn_batch, n_tok, v_batch);
 
-            for (u32 i = 0; i < n_tok; i++)
-            {
-                f32 *qi = q_batch + (u64)i*ctx.d_model;
-                for (u32 c = 0; c < ctx.d_model; c++){
-                    qi[c] += ((f32*)l.attn_q_bias.tensor_data)[c];
-                }
-                f32 *ki = k_batch + (u64)i*ctx.kv_dim;
-                for (u32 c = 0; c < ctx.kv_dim; c++) {
-                    ki[c] += ((f32*)l.attn_k_bias.tensor_data)[c];
-                }
-
-                f32 *vi = v_batch + (u64)i*ctx.kv_dim;
-                for (u32 c = 0; c < ctx.kv_dim; c++){
-                    vi[c] += ((f32*)l.attn_v_bias.tensor_data)[c];
-                }
-
-                for (u32 h = 0; h < model.cfg.attention_head_count; h++){
-                    rope(qi + h*ctx.head_dim, ctx.head_dim, i, model.cfg.rope_freq);
-                }
-                for (u32 h = 0; h < model.cfg.attention_head_count_kv; h++){
-                    rope(ki + h*ctx.head_dim, ctx.head_dim, i, model.cfg.rope_freq);
-                }
-
-                f32 *k_cache_slot = ctx.kv_cache_k + (layer_idx * ctx.max_seq + i) * ctx.kv_dim;
-                f32 *v_cache_slot = ctx.kv_cache_v + (layer_idx * ctx.max_seq + i) * ctx.kv_dim;
-                memcpy(k_cache_slot, ki, sizeof(f32) * ctx.kv_dim);
-                memcpy(v_cache_slot, vi, sizeof(f32) * ctx.kv_dim);
-            }
-            {
-                ZoneScopedN("Prefill Attention Heads");
                 for (u32 i = 0; i < n_tok; i++)
                 {
                     f32 *qi = q_batch + (u64)i*ctx.d_model;
-                    f32 *oi = o_batch + (u64)i*ctx.d_model;
+                    for (u32 c = 0; c < ctx.d_model; c++){
+                        qi[c] += ((f32*)l.attn_q_bias.tensor_data)[c];
+                    }
+                    f32 *ki = k_batch + (u64)i*ctx.kv_dim;
+                    for (u32 c = 0; c < ctx.kv_dim; c++) {
+                        ki[c] += ((f32*)l.attn_k_bias.tensor_data)[c];
+                    }
 
-                    for (u32 h = 0; h < model.cfg.attention_head_count; h++)
+                    f32 *vi = v_batch + (u64)i*ctx.kv_dim;
+                    for (u32 c = 0; c < ctx.kv_dim; c++){
+                        vi[c] += ((f32*)l.attn_v_bias.tensor_data)[c];
+                    }
+
+                    for (u32 h = 0; h < model.cfg.attention_head_count; h++){
+                        rope(qi + h*ctx.head_dim, ctx.head_dim, i, model.cfg.rope_freq);
+                    }
+                    for (u32 h = 0; h < model.cfg.attention_head_count_kv; h++){
+                        rope(ki + h*ctx.head_dim, ctx.head_dim, i, model.cfg.rope_freq);
+                    }
+                    
+                    f32 *k_cache_slot = KV_K_AT(ctx, layer_idx, i);
+                    f32 *v_cache_slot = KV_V_AT(ctx, layer_idx, i);
+                    memcpy(k_cache_slot, ki, sizeof(f32) * ctx.kv_dim);
+                    memcpy(v_cache_slot, vi, sizeof(f32) * ctx.kv_dim);
+                }
+                {
+                    ZoneScopedN("Prefill Attention Heads");
+                    for (u32 i = 0; i < n_tok; i++)
                     {
-                        u32 kv = h / ctx.gqa_group_size;
-                        f32 *qh = qi + h*ctx.head_dim;
+                        f32 *qi = q_batch + (u64)i*ctx.d_model;
+                        f32 *oi = o_batch + (u64)i*ctx.d_model;
 
-                        for (u32 t = 0; t <= i; t++)
+                        for (u32 h = 0; h < model.cfg.attention_head_count; h++)
                         {
-                            f32 *kh_t = ctx.kv_cache_k + (layer_idx * ctx.max_seq + t) * ctx.kv_dim + kv*ctx.head_dim;
-                            ctx.attn_scores[t] = vec_dot_f32(qh, kh_t, ctx.head_dim) * ctx.scale;
-                        }
-                        softmax_f32(ctx.attn_scores, ctx.attn_scores, i + 1);
+                            u32 kv = h / ctx.gqa_group_size;
+                            f32 *qh = qi + h*ctx.head_dim;
 
-                        f32 *oh = oi + h*ctx.head_dim;
-                        for (u32 c = 0; c < ctx.head_dim; c++) oh[c] = 0.0f;
-                        for (u32 t = 0; t <= i; t++)
-                        {
-                            f32 *vh_t = ctx.kv_cache_v + (layer_idx * ctx.max_seq + t) * ctx.kv_dim + kv*ctx.head_dim;
-                            f32 w = ctx.attn_scores[t];
-                            for (u32 c = 0; c < ctx.head_dim; c++){
-                                oh[c] += w * vh_t[c];
+                            for (u32 t = 0; t <= i; t++)
+                            {
+                                f32 *kh_t =  KV_HEAD_K(ctx, layer_idx, t, kv);
+                                ctx.attn_scores[t] = vec_dot_f32(qh, kh_t, ctx.head_dim) * ctx.scale;
+                            }
+                            softmax_f32(ctx.attn_scores, ctx.attn_scores, i + 1);
+
+                            f32 *oh = oi + h*ctx.head_dim;
+                            for (u32 c = 0; c < ctx.head_dim; c++) oh[c] = 0.0f;
+                            for (u32 t = 0; t <= i; t++)
+                            {
+                                f32 *vh_t = KV_HEAD_V(ctx, layer_idx, t, kv);
+                                f32 w = ctx.attn_scores[t];
+                                for (u32 c = 0; c < ctx.head_dim; c++){
+                                    oh[c] += w * vh_t[c];
+                                }
                             }
                         }
                     }
-                }
-                matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_output.tensor_data, l.attn_output.dims[0], l.attn_output.dims[1], o_batch, n_tok, attn_out_batch);
+                    matmul_q8_0_threaded(pool, (block_q8_0*)l.attn_output.tensor_data, l.attn_output.dims[0], l.attn_output.dims[1], o_batch, n_tok, attn_out_batch);
 
-                for (u32 i = 0; i < n_tok; i++)
-                {
-                    f32 *xi = x_batch + (u64)i*ctx.d_model;
-                    f32 *ai = attn_out_batch + (u64)i*ctx.d_model;
-                    f32 *ri = residual_batch + (u64)i*ctx.d_model;
-                    for (u32 c = 0; c < ctx.d_model; c++) ri[c] = xi[c] + ai[c];
+                    for (u32 i = 0; i < n_tok; i++)
+                    {
+                        f32 *xi = x_batch + (u64)i*ctx.d_model;
+                        f32 *ai = attn_out_batch + (u64)i*ctx.d_model;
+                        f32 *ri = residual_batch + (u64)i*ctx.d_model;
+                        for (u32 c = 0; c < ctx.d_model; c++) ri[c] = xi[c] + ai[c];
+                    }
                 }
-            }
             attention.Leave();
 
             TracySection ffn("Prefill FFN");
@@ -1137,7 +1164,7 @@ int main(void)
         
                             for (u32 t = 0; t <= cur_pos; t++)
                             {
-                                f32 *kh_t = ctx.kv_cache_k + (layer_idx * ctx.max_seq + t) * ctx.kv_dim + kv*ctx.head_dim;
+                                f32 *kh_t =  KV_HEAD_K(ctx, layer_idx, t, kv);
                                 ctx.attn_scores[t] = vec_dot_f32(qh, kh_t, ctx.head_dim) * ctx.scale;
                             }
                             softmax_f32(ctx.attn_scores, ctx.attn_scores, cur_pos + 1);
@@ -1148,7 +1175,7 @@ int main(void)
                             } 
                             for (u32 t = 0; t <= cur_pos; t++)
                             {
-                                f32 *vh_t = ctx.kv_cache_v + (layer_idx * ctx.max_seq + t) * ctx.kv_dim + kv*ctx.head_dim;
+                                f32 *vh_t = KV_HEAD_V(ctx, layer_idx, t, kv);
                                 f32 w = ctx.attn_scores[t];
                                 for (u32 i = 0; i < ctx.head_dim; i++){
                                     oh[i] += w * vh_t[i];

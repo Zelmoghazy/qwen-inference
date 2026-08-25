@@ -1,14 +1,8 @@
 #include "utils.hpp"
 #include "tokenizer.hpp"
+#include "qwen_tables.hpp"
 
-extern const size_t VOCAB_SIZE;
-extern const size_t NUM_MERGES;
-extern const int BYTE_TO_ID[256];
-extern const int MERGE_LEFT[], MERGE_RIGHT[], MERGE_RESULT[];
-extern const unsigned char ID_TO_BYTES_BLOB[];
-extern const uint32_t ID_TO_BYTES_OFFSET[];
-
-const char* regex_pattern = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}" "| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
+static const char* regex_pattern = "(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\\r\\n\\p{L}\\p{N}]?\\p{L}+|\\p{N}" "| ?[^\\s\\p{L}\\p{N}]+[\\r\\n]*|\\s*[\\r\\n]+|\\s+(?!\\S)|\\s+";
 
 /*  
     tokenizer.ggml.eos_token_id= 151645 (scalar, type=uint32) 
@@ -19,7 +13,7 @@ std::vector<std::string> special_tokens = {
     "<|endoftext|>", "<|im_start|>","<|im_end|>","<|object_ref_start|>","<|object_ref_end|>","<|box_start|>","<|box_end|>","<|quad_start|>","<|quad_end|>","<|vision_start|>","<|vision_end|>","<|vision_pad|>","<|image_pad|>","<|video_pad|>", "<tool_call>","</tool_call>","<|fim_prefix|>","<|fim_middle|>","<|fim_suffix|>","<|fim_pad|>","<|repo_name|>","<|file_sep|>"
 };
 
-int special_token_to_id[] = {
+static const int special_token_to_id[22] = {
     151643, 151644, 151645, 151646, 151647, 151648, 151649, 151650, 
     151651, 151652, 151653, 151654, 151655, 151656, 151657, 151658, 
     151659, 151660, 151661, 151662, 151663, 151664
@@ -39,21 +33,19 @@ struct Segment
     size_t      end;
 };
 
-struct MergeRule { int rank; int result_id; };
+struct MergeRule 
+{
+    int rank;
+    int result_id; 
+};
+
 std::unordered_map<uint64_t, MergeRule> g_merge_lookup;
 
 std::string normalize_nfc(const std::string& input)
 {
     utf8proc_uint8_t* normalized = utf8proc_NFC(reinterpret_cast<const utf8proc_uint8_t*>(input.c_str()));
-
-    if (!normalized){
-        // ?
-    }
-
     std::string result(reinterpret_cast<const char*>(normalized));
-
     free(normalized);
-
     return result;
 }
 

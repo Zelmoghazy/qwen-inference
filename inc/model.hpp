@@ -44,6 +44,7 @@ struct BlockInfo
 
 struct ModelInfo
 {
+    std::string             name;
     ModelConfig             cfg;
     TensorInfo              token_embd;
     TensorInfo              output_norm;

@@ -19,12 +19,12 @@ set L_FLAGS=/SUBSYSTEM:CONSOLE
 set APP_SRC=..\src\main.cpp
 set TEST_SRC=..\test\test.cpp 
 
-set SRC=..\src\tokenizer.cpp ..\src\qwen_tables.cpp ..\src\gguf.cpp ..\src\engine.cpp ..\src\utils.cpp ..\src\arena.c
+set SRC=..\src\tokenizer.cpp ..\src\qwen_tables.cpp ..\src\gguf.cpp ..\src\engine.cpp ..\src\utils.cpp ..\src\arena.c ..\external\src\glad.c ..\external\inc\imgui\imgui_demo.cpp
 
 set INCLUDE_DIRS=/I..\inc /I..\external\inc\
 set LIBRARY_DIRS=/LIBPATH:..\external\lib\
 
-set LIBRARIES=pcre2-8-static.lib utf8proc_static.lib user32.lib shell32.lib kernel32.lib
+set LIBRARIES=imgui.lib glfw3.lib nfd.lib lunasvg.lib plutovg.lib pcre2-8-static.lib utf8proc_static.lib gdi32.lib ole32.lib user32.lib shell32.lib kernel32.lib
 set TEST_LIBS=simdjson.lib Catch2.lib Catch2Main.lib 
 set PROFILE_LIBS=TracyClient.lib
 

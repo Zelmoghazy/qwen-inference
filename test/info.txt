@@ -86,3 +86,17 @@
     {{- '<|im_start|>assistant\n' }}
 {%- endif %}"
 34. general.quantization_version= 2 (scalar, type=uint32)
+  0. token_embd.weight                        dims=[2048,151936] type=q8_0 offset=0
+  1. blk.0.attn_norm.weight                   dims=[2048] type=f32 offset=330612736
+  2. blk.0.ffn_down.weight                    dims=[11008,2048] type=q8_0 offset=330620928
+  3. blk.0.ffn_gate.weight                    dims=[2048,11008] type=q8_0 offset=354574336
+  4. blk.0.ffn_up.weight                      dims=[2048,11008] type=q8_0 offset=378527744
+  5. blk.0.ffn_norm.weight                    dims=[2048] type=f32 offset=402481152
+  6. blk.0.attn_k.bias                        dims=[256] type=f32 offset=402489344
+  7. blk.0.attn_k.weight                      dims=[2048,256] type=q8_0 offset=402490368
+  8. blk.0.attn_output.weight                 dims=[2048,2048] type=q8_0 offset=403047424
+  9. blk.0.attn_q.bias                        dims=[2048] type=f32 offset=407503872
+ 10. blk.0.attn_q.weight                      dims=[2048,2048] type=q8_0 offset=407512064
+ 11. blk.0.attn_v.bias                        dims=[256] type=f32 offset=411968512
+ 12. blk.0.attn_v.weight                      dims=[2048,256] type=q8_0 offset=411969536
+433. output_norm.weight                       dims=[2048] type=f32 offset=3279511552

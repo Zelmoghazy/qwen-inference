@@ -13,22 +13,60 @@
 #include <vector>
 #include <string>
 #include <unordered_map>
+#include <map>
 #include <stdexcept>
+#include <fstream>
+#include <sstream>
+#include <chrono>
+#include <thread>
+#include <algorithm>
+
 #include <immintrin.h> 
 
 #include "tracy/tracy/Tracy.hpp"
 
 #define LOG 1
 
+#define KB(n)                           (((u64)(n)) << 10)
+#define MB(n)                           (((u64)(n)) << 20)
+#define GB(n)                           (((u64)(n)) << 30)
+
 typedef uint8_t u8;
 typedef int8_t i8;
 typedef uint16_t u16;
+typedef int16_t i16;
 typedef uint64_t u64;
 typedef int64_t i64;
 typedef uint32_t u32;
+typedef int32_t i32;
 typedef float f32;
 typedef double f64;
 
+#ifdef _WIN32
+    typedef HANDLE thread_handle_t;
+    typedef DWORD (WINAPI *thread_func_t)(LPVOID);
+    typedef LPVOID thread_func_param_t;
+    typedef DWORD thread_func_ret_t;
+    typedef CONDITION_VARIABLE cond_handle_t;
+    typedef CRITICAL_SECTION mutex_handle_t;
+    typedef HANDLE pipe_handle;
+    typedef HANDLE event_handle;
+    typedef volatile LONG atomic_int_t;
+#else
+    typedef pthread_t thread_handle_t;
+    typedef void* (*thread_func_t)(void*);
+    typedef void* thread_func_param_t;
+    typedef void* thread_func_ret_t;
+    typedef pthread_mutex_t mutex_handle_t;
+    typedef pthread_cond_t cond_handle_t;
+    typedef int pipe_handle;
+    typedef struct {
+        pthread_mutex_t mutex;
+        pthread_cond_t cond;
+        bool signaled;
+    }event_handle;
+    typedef atomic_int atomic_int_t;
+#endif
 
 typedef __m256  f32x8;
 
@@ -58,41 +96,6 @@ private:
     uint32_t idx;
 };
 
-
-#define KB(n)                           (((u64)(n)) << 10)
-#define MB(n)                           (((u64)(n)) << 20)
-#define GB(n)                           (((u64)(n)) << 30)
-
-#ifdef _WIN32
-    typedef HANDLE thread_handle_t;
-    typedef DWORD (WINAPI *thread_func_t)(LPVOID);
-    typedef LPVOID thread_func_param_t;
-    typedef DWORD thread_func_ret_t;
-    typedef CONDITION_VARIABLE cond_handle_t;
-    typedef CRITICAL_SECTION mutex_handle_t;
-    typedef HANDLE pipe_handle;
-    typedef HANDLE event_handle;
-    typedef volatile LONG atomic_int_t;
-#else
-    typedef pthread_t thread_handle_t;
-    typedef void* (*thread_func_t)(void*);
-    typedef void* thread_func_param_t;
-    typedef void* thread_func_ret_t;
-    typedef pthread_mutex_t mutex_handle_t;
-    typedef pthread_cond_t cond_handle_t;
-    typedef int pipe_handle;
-    typedef struct {
-        pthread_mutex_t mutex;
-        pthread_cond_t cond;
-        bool signaled;
-    }event_handle;
-    typedef atomic_int atomic_int_t;
-#endif
-
-typedef struct {
-    atomic_int_t locked;
-} spinlock_t;
-
 typedef void (*job_func_t)(void* data);
 
 typedef struct 
@@ -100,6 +103,11 @@ typedef struct
     job_func_t func;
     void* data;
 }job_t;
+
+typedef struct 
+{
+    atomic_int_t locked;
+} spinlock_t;
 
 typedef struct 
 {
@@ -113,6 +121,33 @@ typedef struct
     bool should_terminate;
     atomic_int_t active_jobs;
 } thread_pool_t;
+
+struct BandwidthResult 
+{
+    double gbps;
+    double seconds;
+};
+
+struct BenchmarkContext 
+{
+    const u8* data;
+    size_t size_bytes;
+    u32 n_threads;
+
+    mutex_handle_t mutex;
+    cond_handle_t ready_cond;   
+    cond_handle_t start_cond;  
+    int ready_threads;
+    int start_signal;
+
+    BenchmarkContext(const u8* data, size_t size_bytes, u32 n_threads);
+};
+
+struct BenchmarkThreadData {
+    u32 tid;
+    BenchmarkContext* ctx;
+    u64 partial_sum;
+};
 
 void atomic_inc(atomic_int_t* var);
 void atomic_dec(atomic_int_t* var);
@@ -135,15 +170,14 @@ void threadpool_destroy(thread_pool_t* pool);
 void threadpool_queue_job(thread_pool_t* pool, job_func_t func, void* data);
 void threadpool_queue_jobs_batch(thread_pool_t* pool, const job_t* jobs, int count);
 void threadpool_wait(thread_pool_t* pool);
-
-/*
-    there is neither pending nor in progress jobs
- */
 bool threadpool_busy(thread_pool_t* pool);
 
+thread_func_ret_t benchmark_worker_func(thread_func_param_t arg);
+BandwidthResult bandwidth_run_once(const void* data, size_t size_bytes, u32 n_threads);
+void bandwidth_benchmark_suite(const void* data, size_t size_bytes, u32 n_threads, u32 n_iters = 10);
 
-
-static inline f32x8 f32x8_zero(void) {
+static inline f32x8 f32x8_zero(void) 
+{
     return _mm256_setzero_ps();
 }
 static inline f32x8 f32x8_set1(float x) 

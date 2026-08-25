@@ -188,6 +188,7 @@ void os_yield(void)
     sched_yield();
 #endif
 }
+
 void spin_init(spinlock_t* s)    
 { 
     atomic_exchange(&s->locked, 0); 
@@ -207,6 +208,7 @@ void spin_unlock(spinlock_t* s)
 {
     atomic_exchange(&s->locked, 0);
 }
+
 thread_func_ret_t thread_loop(thread_func_param_t param)
 {
     thread_pool_t* pool = (thread_pool_t*)param;
@@ -267,6 +269,8 @@ thread_pool_t* threadpool_create(void)
 
     pool->should_terminate = false;
     pool->active_jobs = 0;
+
+    pool->jobs.reserve(2048);
 
     mutex_init(&pool->queue_mutex);
 
@@ -365,3 +369,141 @@ bool threadpool_busy(thread_pool_t* pool)
     return busy;
 }
 
+BenchmarkContext::BenchmarkContext(const u8* data, size_t size_bytes, u32 n_threads)
+                  : data(data), size_bytes(size_bytes), n_threads(n_threads), ready_threads(0), start_signal(false)
+{
+    mutex_init(&mutex);
+    cond_init(&ready_cond);
+    cond_init(&start_cond);
+}
+
+std::atomic<u64> g_sink{0}; 
+
+thread_func_ret_t benchmark_worker_func(thread_func_param_t arg)
+{
+    BenchmarkThreadData* td = (BenchmarkThreadData*)arg;
+    BenchmarkContext* ctx = td->ctx;
+    
+    i32 tid = td->tid;
+    i32 n_threads = ctx->n_threads;
+    size_t size_bytes = ctx->size_bytes;
+    const u8* data = ctx->data;
+
+    size_t chunk = size_bytes / n_threads;
+    const u8* p = data + tid * chunk;
+    size_t len = (tid == n_threads - 1) ? (size_bytes - tid * chunk) : chunk;
+
+    mutex_lock(&ctx->mutex);
+    ctx->ready_threads++;
+    if (ctx->ready_threads == n_threads) {
+        cond_signal(&ctx->ready_cond);
+    }
+    while (ctx->start_signal == 0) {
+        cond_wait(&ctx->start_cond, &ctx->mutex);
+    }
+    mutex_unlock(&ctx->mutex);
+
+    u64 sum0 = 0;
+    u64 sum1 = 0;
+    u64 sum2 = 0;
+    u64 sum3 = 0;
+
+    for (size_t i = 0; i + 32 <= len; i += 32) {
+        sum0 += *(const u64*)(p + i + 0);
+        sum1 += *(const u64*)(p + i + 8);
+        sum2 += *(const u64*)(p + i + 16);
+        sum3 += *(const u64*)(p + i + 24);
+    }
+
+    u64 sum = sum0 + sum1 + sum2 + sum3;
+    td->partial_sum = sum;
+    
+    return 0;
+}
+
+BandwidthResult bandwidth_run_once(const void* data, size_t size_bytes, u32 n_threads)
+{
+    BenchmarkContext ctx((const u8*)data, size_bytes,n_threads);
+
+    std::vector<BenchmarkThreadData> tdata(n_threads);
+    std::vector<thread_handle_t> handles(n_threads);
+
+    for (u32 t = 0; t < n_threads; t++) {
+        tdata[t].tid = t;
+        tdata[t].ctx = &ctx;
+        tdata[t].partial_sum = 0;
+        handles[t] = create_thread((thread_func_t)benchmark_worker_func, (thread_func_param_t)&tdata[t]);
+    }
+
+    mutex_lock(&ctx.mutex);
+    while (ctx.ready_threads < (int)n_threads) {
+        cond_wait(&ctx.ready_cond, &ctx.mutex);
+    }
+    auto t0 = std::chrono::high_resolution_clock::now();
+    ctx.start_signal = 1;
+    cond_broadcast(&ctx.start_cond);
+    mutex_unlock(&ctx.mutex);
+
+    for (u32 t = 0; t < n_threads; t++) {
+        join_thread(handles[t]);
+    }
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    mutex_destroy(&ctx.mutex);
+    cond_destroy(&ctx.ready_cond);
+    cond_destroy(&ctx.start_cond);
+
+    u64 check = 0;
+    for (u32 t = 0; t < n_threads; t++) {
+        check += tdata[t].partial_sum;
+    }
+    
+    g_sink.fetch_add(check, std::memory_order_relaxed);
+
+    double secs = std::chrono::duration<double>(t1 - t0).count();
+    double gb   = size_bytes / (1024.0 * 1024.0 * 1024.0);
+    
+    return { gb / secs, secs };
+}
+
+void bandwidth_benchmark_suite(const void* data, size_t size_bytes, u32 n_threads, u32 n_iters)
+{
+    double gb = size_bytes / (1024.0 * 1024.0 * 1024.0);
+    std::println("Benchmarking {:.2f} GB with {} threads, {} iterations", gb, n_threads, n_iters);
+    std::println("{:>4} {:>10} {:>10}", "run", "GB/s", "ms");
+    std::println("----------------------------");
+
+    std::vector<double> gbps_results;
+    gbps_results.reserve(n_iters);
+
+    for (u32 i = 0; i < n_iters; i++)
+    {
+        auto r = bandwidth_run_once(data, size_bytes, n_threads);
+        gbps_results.push_back(r.gbps);
+        std::println("{:>4} {:>10.2f} {:>10.2f}", i, r.gbps, r.seconds * 1000.0);
+    }
+
+    double min_gbps = *std::min_element(gbps_results.begin(), gbps_results.end());
+    double max_gbps = *std::max_element(gbps_results.begin(), gbps_results.end());
+    double sum = 0.0;
+    for (double v : gbps_results){
+        sum += v;
+    }
+    double avg_gbps = sum / gbps_results.size();
+    double var = 0.0;
+    for (double v : gbps_results){
+        var += (v - avg_gbps) * (v - avg_gbps);
+    }
+    double stddev = std::sqrt(var / gbps_results.size());
+    
+    std::println("----------------------------");
+    std::println("min: {:.2f} GB/s", min_gbps);
+    std::println("max: {:.2f} GB/s", max_gbps);
+    std::println("avg: {:.2f} GB/s", avg_gbps);
+    std::println("std: {:.2f} GB/s", stddev);
+    std::println("");
+    std::println("Theoretical max tok/s bound:");
+    std::println("  worst-case (min bw): {:.2f} tok/s", min_gbps / gb);
+    std::println("  typical    (avg bw): {:.2f} tok/s", avg_gbps / gb);
+    std::println("  best-case  (max bw): {:.2f} tok/s", max_gbps / gb);
+}

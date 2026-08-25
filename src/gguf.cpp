@@ -1,4 +1,3 @@
-
 #include "gguf.hpp"
 
 long long get_file_size(const char *FileName) 
@@ -198,71 +197,81 @@ bool get_scalar_value(Data *d, u32 type, GGUFScalarType &out)
     {
     case GGUF_TYPE_UINT8: {
         u8 *v = Consume(d, u8);
-        if (!v)
+        if (!v){
             return false;
+        }
         out.UINT8 = *v;
         return true;
     }
     case GGUF_TYPE_INT8: {
-        int8_t *v = Consume(d, int8_t);
-        if (!v)
+        i8 *v = Consume(d, int8_t);
+        if (!v){
             return false;
+        }
         out.INT8 = *v;
         return true;
     }
     case GGUF_TYPE_UINT16: {
-        uint16_t *v = Consume(d, uint16_t);
-        if (!v)
+        u16 *v = Consume(d, uint16_t);
+        if (!v){
             return false;
+        }
         out.UINT16 = *v;
         return true;
     }
     case GGUF_TYPE_INT16: {
-        int16_t *v = Consume(d, int16_t);
-        if (!v)
+        i16 *v = Consume(d, int16_t);
+        if (!v){
             return false;
+        }
         out.INT16 = *v;
         return true;
     }
     case GGUF_TYPE_UINT32: {
         u32 *v = Consume(d, u32);
-        if (!v)
+        if (!v){
             return false;
+        }
         out.UINT32 = *v;
         return true;
     }
     case GGUF_TYPE_INT32: {
-        int32_t *v = Consume(d, int32_t);
-        if (!v)
+        i32 *v = Consume(d, int32_t);
+        if (!v){
             return false;
+        }
         out.INT32 = *v;
         return true;
     }
     case GGUF_TYPE_FLOAT32: {
         f32 *v = Consume(d, f32);
-        if (!v)
+        if (!v){
             return false;
+        }
         out.FLOAT32 = *v;
         return true;
     }
     case GGUF_TYPE_BOOL: {
         u8 *v = Consume(d, u8);
-        if (!v)
+        if (!v){
             return false;
+        }
         out.BOOL = *v;
         return true;
     }
     case GGUF_TYPE_UINT64: {
         u64 *v = Consume(d, u64);
-        if (!v)
+        if (!v){
             return false;
+        }
         out.UINT64 = (f64) *v;
         return true;
     }
     case GGUF_TYPE_INT64: {
         i64 *v = Consume(d, i64);
-        if (!v)
+        if (!v){
             return false;
+        }
         out.INT64 = (f64) *v;
         return true;
     }
@@ -278,130 +287,63 @@ bool get_scalar_value(Data *d, u32 type, GGUFScalarType &out)
     }
 }
 
-void print_scalar(u32 type, GGUFScalarType value)
+static std::string scalar_to_str(u32 type, GGUFScalarType value)
 {
     switch (type)
     {
-        case GGUF_TYPE_UINT8: {
-            std::print("= {} (scalar, type={}) ", value.UINT8, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_INT8: {
-            std::print("= {} (scalar, type={}) ", value.INT8, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_UINT16: {
-            std::print("= {} (scalar, type={}) ", value.UINT16, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_INT16: {
-            std::print("= {} (scalar, type={}) ", value.INT16, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_UINT32: {
-            std::print("= {} (scalar, type={}) ", value.UINT32, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_INT32: {
-            std::print("= {} (scalar, type={}) ", value.INT32, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_FLOAT32: {
-            std::print("= {} (scalar, type={}) ", value.FLOAT32, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_BOOL: {
-            std::print("= {} (scalar, type={}) ", value.BOOL, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_UINT64: {
-            std::print("= {} (scalar, type={}) ", value.UINT64, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_INT64: {
-            std::print("= {} (scalar, type={}) ", value.INT64, gguf_type_name(type));
-            break;
-        }
-        case GGUF_TYPE_FLOAT64: {
-            std::print("= {} (scalar, type={}) ", value.FLOAT64, gguf_type_name(type));
-            break;
-        }
-        default:
-            return; 
+        case GGUF_TYPE_UINT8:   return std::to_string(value.UINT8);
+        case GGUF_TYPE_INT8:    return std::to_string(value.INT8);
+        case GGUF_TYPE_UINT16:  return std::to_string(value.UINT16);
+        case GGUF_TYPE_INT16:   return std::to_string(value.INT16);
+        case GGUF_TYPE_UINT32:  return std::to_string(value.UINT32);
+        case GGUF_TYPE_INT32:   return std::to_string(value.INT32);
+        case GGUF_TYPE_FLOAT32: return std::to_string(value.FLOAT32);
+        case GGUF_TYPE_BOOL:    return value.BOOL ? "true" : "false";
+        case GGUF_TYPE_UINT64:  return std::to_string(value.UINT64);
+        case GGUF_TYPE_INT64:   return std::to_string(value.INT64);
+        case GGUF_TYPE_FLOAT64: return std::to_string(value.FLOAT64);
+        default:                return "?";
     }
 }
 
-void print_scalar_value(u32 idx, std::string_view &meta_key, u32 type, GGUFScalarType value)
-{
-    std::print("{:>3}. {}", idx, meta_key);
-    print_scalar(type, value);
-    std::println("");
-}
-
-bool print_value(Data *d, u32 type, int depth, u64 preview)
+static std::string value_to_string(Data *d, u32 type, int depth, u64 preview = 8)
 {
     if (type == GGUF_TYPE_STRING)
     {
-        std::string_view s = read_gguf_string(d);
-        #if LOG
-            std::print("\"{}\"", s);
-        #endif
-        return true;
+        return std::string(read_gguf_string(d));
     }
 
-    if (type != GGUF_TYPE_ARRAY) 
+    if (type != GGUF_TYPE_ARRAY)
     {
         GGUFScalarType value;
         get_scalar_value(d, type, value);
-        #if LOG
-            print_scalar(type, value);
-        #endif
-        return true;
+        return scalar_to_str(type, value);
     }
 
-    if (depth > 8) {
-        return false;
-    }
- 
+    if (depth > 8) return "";
+
     u32 *elem_type = Consume(d, u32);
     u64 *count     = Consume(d, u64);
+    if (!elem_type || !count) return "";
 
-    if (!elem_type || !count) {
-        return false;
-    }
-    
-    #if LOG
-        std::print("[{} x {}] (", *count, gguf_type_name(*elem_type));
-    #endif
- 
-    const u64 to_show  = std::min(*count, preview);
- 
+    const u64 to_show = std::min(*count, preview);
+
+    std::string out = "[";
     for (u64 i = 0; i < to_show; i++)
     {
-        #if LOG
-            if (i) {
-                std::print(", ");
-            }
-        #endif
-        if (!print_value(d, *elem_type, depth + 1)){
-            return false;
-        } 
+        if (i) out += ", ";
+        out += value_to_string(d, *elem_type, depth + 1,  preview);
     }
 
-    for (u64 i = to_show; i < *count; i++) {
-        if (!skip_value(d, *elem_type, depth + 1)){
-            return false;
-        } 
+    for (u64 i = to_show; i < *count; i++)
+    {
+        if (!skip_value(d, *elem_type, depth + 1))
+            break; 
     }
-    
-    #if LOG
-        if (*count > to_show) {
-            std::print(", ...");
-        }
-        std::print(")");
-    #endif
-    
-    return true;
+
+    if (*count > to_show) out += ", ...";
+    out += "]";
+    return out;
 }
 
 bool parse_u32(std::string_view idx_str, u32& idx)
@@ -456,20 +398,11 @@ static bool parse_blk_name(std::string_view name, u32& layer_idx, std::string_vi
 }
 
 
-void print_tensor_info(std::string_view name, u64 *dims, u32 n_dims, u32 tensor_type, u32 offset, u32 i)
-{
-    std::print("{:>3}. {:<40} dims=[", i, name);
-    for (u32 d = 0; d < n_dims; d++){
-        if (d) {
-            std::print(",");
-        }
-        std::print("{}", dims[d]);
-    }
-    std::println("] type={} offset={}", ggml_type_name(tensor_type), offset);
-}
-
-
-bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
+bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base,               
+                std::vector<MetaEntry> &metaEntries,
+                std::vector<TensorEntry> &topLevelTensors,
+                std::map<uint32_t, std::vector<TensorEntry>> &blocks,
+                std::string &architecture)
 {
     ZoneScopedN("GGUF Parser");
 
@@ -493,7 +426,7 @@ bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
 
             // The value.
             gguf_metadata_value_t value;
-    }; 
+        }; 
     */
     for (u64 i = 0; i < header->metadata_kv_count; i++)
     {
@@ -545,79 +478,71 @@ bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
                 assert(*value_type == GGUF_TYPE_UINT32);
                 model.cfg.alignment = value.UINT32;
             }
-            #if LOG
-                print_scalar_value(i, key, *value_type, value);
-            #endif
+            else if (ends_with(key, "context_length"))
+            {
+                assert(*value_type == GGUF_TYPE_UINT32);
+                model.cfg.context_length = value.UINT32;
+            }
+            metaEntries.push_back({(uint32_t)i, std::string(key), gguf_type_name(*value_type), scalar_to_str(*value_type, value)});
         }
         else
         {
-            #if LOG
-                /* Array or string */
-                std::print("{:>3}. {} = ", i, key);
-            #endif
-        
-                print_value(&gguf, *value_type);
+            std::string val_str;
 
-            #if LOG
-                std::println("");
-            #endif
+            if (*value_type == GGUF_TYPE_STRING)
+            {
+                std::string_view value = read_gguf_string(&gguf);
+                if (key == "general.name"){
+                    model.name = std::string(value);
+                }
+                if (key == "general.architecture"){
+                    architecture = std::string(value);
+                }
+                val_str = std::string(value);
+            }
+            else
+            {
+                val_str = value_to_string(&gguf, *value_type, 0);
+            }
+
+            metaEntries.push_back({(uint32_t)i, std::string(key), gguf_type_name(*value_type), val_str});
 
         }
     }
-    #if LOG
-        std::println("");
-
-        std::println("-- config --");
-        std::println("embedding_length:       {}", model.cfg.embedding_length);
-        std::println("block_count:            {}", model.cfg.block_count);
-        std::println("attention_head_count:   {}", model.cfg.attention_head_count);
-        std::println("attention_head_count_kv:{}", model.cfg.attention_head_count_kv);
-        std::println("feed_forward_length:    {}", model.cfg.feed_forward_length);
-        std::println("rms_epsilon:            {}", model.cfg.rms_epsilon);
-        std::println("alignment:              {}", model.cfg.alignment);
-        std::println("rope_freq:              {}", model.cfg.rope_freq);
-    
-        std::println("");
-    #endif
-
     model.blocks.resize(model.cfg.block_count);
+    /*
+        struct gguf_tensor_info_t 
+        {
+            // The name of the tensor. It is a standard GGUF string, with the caveat that
+            // it must be at most 64 bytes long.
 
-    #if LOG
-        std::println("-- tensors --");
-    #endif
-/*
-    struct gguf_tensor_info_t 
-    {
-        // The name of the tensor. It is a standard GGUF string, with the caveat that
-        // it must be at most 64 bytes long.
+            gguf_string_t name;
 
-        gguf_string_t name;
+            // The number of dimensions in the tensor.
+            // Currently at most 4, but this may change in the future.
 
-        // The number of dimensions in the tensor.
-        // Currently at most 4, but this may change in the future.
+            uint32_t n_dimensions;
 
-        uint32_t n_dimensions;
+            // The dimensions of the tensor.
 
-        // The dimensions of the tensor.
+            uint64_t dimensions[n_dimensions];
 
-        uint64_t dimensions[n_dimensions];
+            // The type of the tensor.
 
-        // The type of the tensor.
+            ggml_type type;
 
-        ggml_type type;
+            // The offset of the tensor's data in this file in bytes.
+            //
+            // This offset is relative to `tensor_data`, not to the start
+            // of the file, to make it easier for writers to write the file.
+            // Readers should consider exposing this offset relative to the
+            // file to make it easier to read the data.
+            //
+            // Must be a multiple of `ALIGNMENT`. That is, `align_offset(offset) == offset`.
 
-        // The offset of the tensor's data in this file in bytes.
-        //
-        // This offset is relative to `tensor_data`, not to the start
-        // of the file, to make it easier for writers to write the file.
-        // Readers should consider exposing this offset relative to the
-        // file to make it easier to read the data.
-        //
-        // Must be a multiple of `ALIGNMENT`. That is, `align_offset(offset) == offset`.
-
-        uint64_t offset;
-    }; 
-*/
+            uint64_t offset;
+        }; 
+    */
     for (u64 i = 0; i < header->tensor_count; i++)
     {
         std::string_view name    = read_gguf_string(&gguf);
@@ -634,8 +559,9 @@ bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
         TensorInfo *slot = nullptr;
         u32 layer_idx; 
         std::string_view rest;
+        bool is_block_tensor = parse_blk_name(name, layer_idx, rest, model.cfg.block_count);
 
-        if (parse_blk_name(name, layer_idx, rest, model.cfg.block_count))
+        if (is_block_tensor)
         {
             if (rest == "attn_norm.weight"){
                 slot = &model.blocks[layer_idx].attn_norm;
@@ -699,9 +625,24 @@ bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
         {
             std::println("unrecognized tensor: {}", name);
         }
-        #if LOG
-            print_tensor_info(name,dims, *n_dims, *tensor_type, *offset,i);
-        #endif
+        std::string dims_str = "[";
+        for (u32 d = 0; d < *n_dims; d++)
+        {
+            if (d) dims_str += ",";
+            dims_str += std::to_string(dims[d]);
+        }
+        dims_str += "]";
+
+        TensorEntry te{(uint32_t)i, std::string(name), dims_str, ggml_type_name(*tensor_type), std::to_string(*offset)};
+
+        if (is_block_tensor)
+        {
+            blocks[layer_idx].push_back(std::move(te));
+        }
+        else
+        {
+            topLevelTensors.push_back(std::move(te));
+        }
     }
 
     u64 consumed   = size - (u64)gguf.len;
@@ -731,5 +672,119 @@ bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base)
         set_data_ptr(l.ffn_down);
     }
 
+    if(model.name == "Qwen2.5 3B Instruct")
+    {
+        for (BlockInfo &l : model.blocks)
+        {
+            assert(l.attn_q.dims[0]==2048 && l.attn_q.dims[1]==2048);
+            assert(l.attn_k.dims[0]==2048 && l.attn_k.dims[1]==256);
+            assert(l.attn_v.dims[0]==2048 && l.attn_v.dims[1]==256);
+            assert(l.attn_output.dims[0]==2048 && l.attn_output.dims[1]==2048);
+            assert(l.ffn_gate.dims[0]==2048 && l.ffn_up.dims[0]==2048);
+            assert(l.ffn_down.dims[1]==2048);
+        }
+    }
+
+    return true;
+}
+
+static u64 tensor_elem_count(const TensorInfo& t)
+{
+    if (!t.present) return 0;
+    u64 n = 1;
+    for (u32 d = 0; d < t.n_dims; d++){
+        n *= t.dims[d];
+    }
+    return n;
+}
+
+static u64 total_param_count(const ModelInfo& model)
+{
+    u64 total = tensor_elem_count(model.token_embd)
+              + tensor_elem_count(model.output_norm)
+              + tensor_elem_count(model.output);
+
+    for (const BlockInfo& blk : model.blocks)
+    {
+        total += tensor_elem_count(blk.attn_norm)
+               + tensor_elem_count(blk.attn_q)      + tensor_elem_count(blk.attn_q_bias)
+               + tensor_elem_count(blk.attn_k)      + tensor_elem_count(blk.attn_k_bias)
+               + tensor_elem_count(blk.attn_v)      + tensor_elem_count(blk.attn_v_bias)
+               + tensor_elem_count(blk.attn_output)
+               + tensor_elem_count(blk.ffn_norm)
+               + tensor_elem_count(blk.ffn_gate)
+               + tensor_elem_count(blk.ffn_up)
+               + tensor_elem_count(blk.ffn_down);
+    }
+    return total;
+}
+
+static std::string format_param_count(u64 n)
+{
+    double v = (double)n;
+    const char* suffix = "";
+    if      (n >= 1'000'000'000ull) { v /= 1e9; suffix = "B"; }
+    else if (n >= 1'000'000ull)     { v /= 1e6; suffix = "M"; }
+    else if (n >= 1'000ull)         { v /= 1e3; suffix = "K"; }
+    else return std::to_string(n);
+
+    std::ostringstream oss;
+    oss.precision(v < 10.0 ? 2 : 1);
+    oss << std::fixed << v << suffix;
+    return oss.str();
+}
+
+static std::string format_thousands(u64 n)
+{
+    std::string s = std::to_string(n);
+    for (i64 i = (i64)s.size() - 3; i > 0; i -= 3) s.insert(i, ",");
+    return s;
+}
+
+static std::string replace_all(std::string s, std::string_view from, std::string_view to)
+{
+    size_t pos = 0;
+    while ((pos = s.find(from, pos)) != std::string::npos)
+    {
+        s.replace(pos, from.size(), to);
+        pos += to.size();
+    }
+    return s;
+}
+
+bool export_architecture_svg(const ModelInfo& model,
+                              const std::string& template_path,
+                              const std::string& output_path)
+{
+    std::ifstream in(template_path, std::ios::binary);
+    if (!in) { std::println("could not open svg template: {}", template_path); return false; }
+
+    std::stringstream buf;
+    buf << in.rdbuf();
+    std::string svg = buf.str();
+
+    const u32 n_vocab  = model.token_embd.present ? (u32)model.token_embd.dims[1] : 0;
+    const u64 n_params = total_param_count(model);
+
+    struct Replacement { const char* key; std::string value; };
+    Replacement subs[] = {
+        { "{{model_name}}",  model.name.empty() ? "unnamed model" : model.name },
+        { "{{param_count}}", format_param_count(n_params) },
+        { "{{n_vocab}}",     format_thousands(n_vocab) },
+        { "{{n_embd}}",      format_thousands(model.cfg.embedding_length) },
+        { "{{n_ff}}",        format_thousands(model.cfg.feed_forward_length) },
+        { "{{n_heads}}",     std::to_string(model.cfg.attention_head_count) },
+        { "{{n_kv_heads}}",  std::to_string(model.cfg.attention_head_count_kv) },
+        { "{{n_ctx}}",       format_thousands(model.cfg.context_length) },
+        { "{{n_layers}}",    std::to_string(model.cfg.block_count) },
+    };
+
+    for (const Replacement& r : subs) svg = replace_all(svg, r.key, r.value);
+
+    std::ofstream out(output_path, std::ios::binary);
+    if (!out) { std::println("could not write svg output: {}", output_path); return false; }
+    out << svg;
+
+    std::println("wrote architecture card -> {}", output_path);
     return true;
 }

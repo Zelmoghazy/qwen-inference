@@ -1,9 +1,5 @@
 #include "engine.hpp"
 
-// FP16 <-> FP32
-// ref: https://github.com/Maratyszcza/FP16
-
-
 static inline f32 f16_to_f32(u16 h)
 {
     u32 sign = (u32)(h & 0x8000u) << 16;
@@ -44,26 +40,6 @@ static inline f32 f16_to_f32(u16 h)
     return f;
 }
 
-f32 dot_q8_0_f32(const block_q8_0 *row, u32 n_blocks, const f32 *x)
-{
-    f32 acc = 0.0f;
-    for (u32 l = 0; l < n_blocks; l++)
-    {
-        f32 delta = ggml_compute_fp16_to_fp32(row[l].d);
-
-        const int8_t *qs = row[l].qs;
-        const f32    *xb = x + (u64)l * 32;
-
-        f32 block_acc = 0.0f;
-        for (u32 i = 0; i < 32; i++){
-            block_acc += (f32)qs[i] * xb[i];
-        }
-
-        acc += block_acc * delta;
-    }
-    return acc;
-}
-
 void mat_vec_mul_q8_0(const block_q8_0 *weight, u32 n_in, u32 n_out, const f32 *input, f32 *output)
 {
     ZoneScopedNC("Matrix Multiplication", tracy::Color::Tomato);
@@ -75,7 +51,22 @@ void mat_vec_mul_q8_0(const block_q8_0 *weight, u32 n_in, u32 n_out, const f32 *
     for (u32 row = 0; row < n_out; row++)
     {
         const block_q8_0 *row_blocks = weight + (u64)row * blocks_per_row;
-        output[row] = dot_q8_0_f32(row_blocks, blocks_per_row, input);
+        f32 acc = 0.0f;
+        for (u32 l = 0; l < blocks_per_row; l++)
+        {
+            f32 delta = f16_to_f32(row_blocks[l].d);
+
+            const int8_t *qs = row_blocks[l].qs;
+            const f32    *xb = input + (u64)l * 32;
+
+            f32 block_acc = 0.0f;
+            for (u32 i = 0; i < 32; i++){
+                block_acc += (f32)qs[i] * xb[i];
+            }
+
+            acc += block_acc * delta;
+        }
+        output[row] = acc;
     }
 }
 
@@ -91,21 +82,5 @@ void embed_token(TensorInfo &embed, u32 token_id, f32 *out, u32 d_model)
     const block_q8_0 *row   = table + (u64)token_id * (d_model / 32);
     for (u32 i = 0; i < d_model; i++){
         out[i] = ggml_compute_fp16_to_fp32(row[i/32].d) * row[i/32].qs[i%32];
-    }
-}
-
-void normalize_l2(f32 *vec, u32 n)
-{
-    f64 sum_sq = 0.0;                       
-    for (u32 i = 0; i < n; i++){                          
-        sum_sq += (f64)vec[i] * (f64)vec[i];
-    }
-
-    f32 norm = (f32)std::sqrt(sum_sq);
-    if (norm > 0.0f)
-    {
-        for (u32 i = 0; i < n; i++){
-            vec[i] /= norm;
-        }
     }
 }

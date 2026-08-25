@@ -14,7 +14,6 @@ static_assert(sizeof(block_q8_0) == 34, "block_q8_0 should be 34 bytes");
 
 void embed_token(TensorInfo &embed, u32 token_id, f32 *out, u32 d_model);
 void mat_vec_mul_q8_0(const block_q8_0 *weight, u32 n_in, u32 n_out, const f32 *input, f32 *output);
-f32 dot_q8_0_f32(const block_q8_0 *row, u32 n_blocks, const f32 *x);
 
 static inline float fp32_from_bits(uint32_t w) 
 {
@@ -35,7 +34,8 @@ static inline uint32_t fp32_to_bits(float f)
     fp32.as_value = f;
     return fp32.as_bits;
 }
-
+// FP16 <-> FP32
+// ref: https://github.com/Maratyszcza/FP16
 static __forceinline f32 ggml_compute_fp16_to_fp32(uint16_t h) 
 {
     const uint32_t w = (uint32_t) h << 16;
@@ -85,4 +85,3 @@ static __forceinline uint16_t ggml_compute_fp32_to_fp16(float f)
     const uint32_t nonsign = exp_bits + mantissa_bits;
     return (sign >> 16) | (shl1_w > UINT32_C(0xFF000000) ? UINT16_C(0x7E00) : nonsign);
 }
-

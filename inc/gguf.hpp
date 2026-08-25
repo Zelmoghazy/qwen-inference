@@ -1,14 +1,13 @@
 #pragma once
 
-
 #include <utils.hpp>
 #include <model.hpp>
-
 
 struct Data
 {
     u8 *ptr;
     i64 len;
+    Data(u8 *ptr, i64 len):ptr(ptr),len(len){}
 };
 
 /*
@@ -46,11 +45,11 @@ enum GGUFType : u32
 union GGUFScalarType
 {
     u8       UINT8;
-    int8_t   INT8;
-    uint16_t UINT16;
-    int16_t  INT16;
+    i8       INT8;
+    u16      UINT16;
+    i16      INT16;
     u32      UINT32;
-    int32_t  INT32;
+    i32      INT32;
     f32      FLOAT32;
     bool     BOOL;
     u64      UINT64;
@@ -58,14 +57,23 @@ union GGUFScalarType
     f64      FLOAT64;
 };
 
+struct MetaEntry
+{
+    u32         idx = 0;
+    std::string key;
+    std::string type;        
+    std::string value;       
+};
+
+struct TensorEntry
+{
+    u32         idx = 0;
+    std::string name;        
+    std::string dims;        
+    std::string type;        
+    std::string offset;      
+};
+
 #define Consume(data, type) (type *)consume_size(data, sizeof(type))
 
-void* consume_size(Data* d, u32 size);
-bool print_value(Data *d, u32 type, int depth=0, u64 preview = 8);
-bool skip_value(Data *d, u32 type, int depth = 0);
-std::string_view read_gguf_string(Data *d);
-const char* ggml_type_name(u32 t);
-bool get_scalar_value(Data *d, u32 type, GGUFScalarType &out);
-const char* gguf_type_name(u32 t);
-void print_scalar_value(u32 idx, std::string_view &meta_key, u32 type, GGUFScalarType value);
-bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base);
+bool parse_gguf(Data &gguf, ModelInfo &model, u64 size, u8 *file_base,std::vector<MetaEntry> &metaEntries,std::vector<TensorEntry> &topLevelTensors, std::map<uint32_t, std::vector<TensorEntry>> &blocks, std::string &architecture);

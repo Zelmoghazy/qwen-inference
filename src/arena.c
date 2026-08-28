@@ -122,7 +122,7 @@ typedef struct arena_checkpoint_t
 void arena_debug_enable(arena_t *arena)
 {
     assert(arena);
-    arena->dbg_log = calloc(1, sizeof(arena_debug_log_t));
+    arena->dbg_log = (arena_debug_log_t*)calloc(1, sizeof(arena_debug_log_t));
     assert(arena->dbg_log);
 }
 
@@ -149,7 +149,7 @@ arena_debug_snapshot_t arena_debug_snapshot(const arena_t *arena)
     snap.block_count = n;
     if (n == 0) return snap;
 
-    snap.blocks = malloc(n * sizeof(arena_block_stats_t));
+    snap.blocks = (arena_block_stats_t*)malloc(n * sizeof(arena_block_stats_t));
     assert(snap.blocks);
 
     b = arena->blocks_head;
@@ -218,7 +218,7 @@ void arena_debug_rec_register(arena_t *arena, byte* ptr, long nbytes,
 */
 arena_t* arena_new(void)
 {
-    arena_t* arena = malloc(sizeof(*arena));
+    arena_t* arena = (arena_t*)malloc(sizeof(*arena));
     assert(arena);
     
     arena->current_block = NULL;
@@ -397,7 +397,7 @@ void *arena_alloc(arena_t *arena, long nbytes, bool first_fit, const char *file,
         // If a new block must be allocated, one is requested that is large enough
         // to hold an arena structure plus nbytes, and have 10K bytes of available space left over.
         long new_block_size = sizeof(union arena_header) + nbytes + 10*1024;
-        new_block = malloc(new_block_size);
+        new_block = (arena_block_t *)malloc(new_block_size);
         assert(new_block);
         cap = (byte *)new_block + new_block_size;
         arena->mem_allocs++;
@@ -505,7 +505,7 @@ arena_checkpoint_t *arena_save(arena_t *arena)
 {
     assert(arena);
 
-    arena_checkpoint_t *cp = malloc(sizeof(*cp));
+    arena_checkpoint_t *cp = (arena_checkpoint_t*)malloc(sizeof(*cp));
     
     assert(cp);
 

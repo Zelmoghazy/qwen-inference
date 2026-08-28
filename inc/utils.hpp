@@ -31,6 +31,17 @@
 #define MB(n)                           (((u64)(n)) << 20)
 #define GB(n)                           (((u64)(n)) << 30)
 
+#define MAT2D_AT(base, i, j, dim_j) \
+    ((base) + ((u64)(i) * (u64)(dim_j) + (u64)(j)))
+
+#define MAT3D_AT(base, i, j, k, dim_j, dim_k) \
+    ((base) + (((u64)(i) * (u64)(dim_j) + (u64)(j)) * (u64)(dim_k) + (u64)(k)))
+
+#define MAT4D_AT(base, i, j, k, l, dim_j, dim_k, dim_l) \
+    ((base) + ((((u64)(i) * (u64)(dim_j) + (u64)(j)) * (u64)(dim_k) + (u64)(k)) * (u64)(dim_l) + (u64)(l)))
+    
+#define ALIGN_UP(x, y)                  ((((x) + (y) - 1) / (y)) * (y))
+
 typedef uint8_t u8;
 typedef int8_t i8;
 typedef uint16_t u16;
@@ -41,6 +52,8 @@ typedef uint32_t u32;
 typedef int32_t i32;
 typedef float f32;
 typedef double f64;
+
+typedef __m256  f32x8;
 
 #ifdef _WIN32
     typedef HANDLE thread_handle_t;
@@ -68,9 +81,7 @@ typedef double f64;
     typedef atomic_int atomic_int_t;
 #endif
 
-typedef __m256  f32x8;
 
-#define ALIGN_UP(x, y)                  ((((x) + (y) - 1) / (y)) * (y))
 
 struct TracySection
 {

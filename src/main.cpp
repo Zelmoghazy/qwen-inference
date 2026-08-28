@@ -404,6 +404,8 @@ struct GGUFLogView
 
     void Draw() const
     {
+        ImGui::Begin("GGUF Viewer");
+        {
         if (ImGui::CollapsingHeader("General", ImGuiTreeNodeFlags_DefaultOpen))
             DrawMetaTable("##general_table", "general.");
 
@@ -414,6 +416,8 @@ struct GGUFLogView
             DrawTensorsSection();
 
         DrawValuePopup();
+        }
+        ImGui::End();
     }
 
 private:
@@ -646,12 +650,11 @@ void matmul_chunk_job(void *data)
     }
 }
 
-
 void matmul_q8_0_threaded(thread_pool_t *pool, const block_q8_0 *weight,
                            u32 n_in, u32 n_out,const f32 *input,u32 n_seq, f32 *output)
 {
     ZoneScopedNC("Matrix Multiplication Multithreaded", tracy::Color::Tomato);
-    assert(n_in % 32 == 0);
+    TracySection matmul_prep("Preparing");
 
     u32 blocks_per_row = n_in / 32;
 
@@ -680,7 +683,7 @@ void matmul_q8_0_threaded(thread_pool_t *pool, const block_q8_0 *weight,
         chunks.push_back({ weight, blocks_per_row, start, end, input, n_in, n_seq,output,n_out });
         jobs.push_back({ matmul_chunk_job, &chunks.back() });
     }
-
+    matmul_prep.Leave();
     threadpool_queue_jobs_batch(pool, jobs.data(), (int)jobs.size());
     threadpool_wait(pool);
 }
@@ -694,6 +697,7 @@ void silu(const f32 *input, f32 *output, u32 size)
     }
 }
 
+/* @Note: norm weights are already f32 no need to dequant */
 void rmsnorm(const f32 *x, const f32 *weight, f32 *out, u32 n, f32 eps)
 {
     f32 ss = 0.0f;
@@ -707,7 +711,7 @@ void rmsnorm(const f32 *x, const f32 *weight, f32 *out, u32 n, f32 eps)
 }
 
 
-// rotate half instead of each pair
+// rotate half instead of each pair from HF code 
 void rope(f32 *vec, u32 head_dim, u32 pos, f32 theta_base)
 {
     u32 half = head_dim / 2;
@@ -871,20 +875,7 @@ struct ModelContext
     }
 };
 
-#if 1
-
-#define KV_AT(base, layer, pos, max_seq, stride) \
-    ((base) + ((u64)(layer) * (u64)(max_seq) + (u64)(pos)) * (u64)(stride))
-
-#define KV_K_AT(ctx,layer,pos) KV_AT((ctx).kv_cache_k, (layer), (pos), (ctx).max_seq, (ctx).kv_dim)
-#define KV_V_AT(ctx,layer,pos) KV_AT((ctx).kv_cache_v, (layer), (pos), (ctx).max_seq, (ctx).kv_dim)
-
-#define KV_HEAD_K(ctx, layer, pos, kv_head) \
-    (KV_K_AT((ctx), (layer), (pos)) + (u64)(kv_head) * (u64)(ctx).head_dim)
-
-#define KV_HEAD_V(ctx, layer, pos, kv_head) \
-    (KV_V_AT((ctx), (layer), (pos)) + (u64)(kv_head) * (u64)(ctx).head_dim)
-
+#if 0
 
 int main(void)
 {
@@ -1115,9 +1106,7 @@ int main(void)
 
                 /* ------------------------------------- */
                 TracySection RMSNorm1("RMSNorm1");
-
                     rmsnorm(ctx.x, (f32*)l.attn_norm.tensor_data, ctx.normed_attn, ctx.d_model, model.cfg.rms_epsilon);
-                
                 RMSNorm1.Leave();
                 /* ------------------------------------- */
 
@@ -1237,22 +1226,60 @@ int main(void)
     decode.Leave();
     std::println("");
     threadpool_destroy(pool);
-    #endif
-
     UnmapViewOfFile(file_base); 
     CloseHandle(Mapping);
     CloseHandle(File);
     return 0;
 }
+#endif
 
-#if 0
+
+#if 1
 int main(void)
 {
     ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
     init_all();
     ImGuiIO &io = ImGui::GetIO();
+
+    TracySection init("Initialization");
+        HANDLE File = CreateFileA("C:\\Users\\zezo_\\.lmstudio\\models\\lmstudio-community"
+                                "\\Qwen2.5-3B-Instruct-GGUF\\Qwen2.5-3B-Instruct-Q8_0.gguf",
+                                GENERIC_READ, FILE_SHARE_READ|FILE_SHARE_WRITE,
+                                0, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, 0);
+        LARGE_INTEGER size;
+        GetFileSizeEx(File, &size);
+
+        HANDLE Mapping = CreateFileMappingA(File, 0, PAGE_READONLY, 0, 0, 0);
+        u8 *file_base = (u8 *)MapViewOfFile(Mapping, FILE_MAP_READ, 0, 0, 0);
+        {
+            WIN32_MEMORY_RANGE_ENTRY range;
+            range.VirtualAddress = file_base;
+            range.NumberOfBytes  = (SIZE_T)size.QuadPart;
+
+            if (!PrefetchVirtualMemory(GetCurrentProcess(), 1, &range, 0)) {
+                std::println("PrefetchVirtualMemory failed: {}", GetLastError());
+            }
+        }
+        
+        Data gguf(file_base, static_cast<i64>(size.QuadPart));
+
+        arena_t *scratch_arena = arena_reserve(MB(500));// check if enough
+        thread_pool_t *pool = threadpool_create();
+
+        init_tokenizer(); 
+    init.Leave();
+
+    TracySection parse("Parsing GGUF");
+        ModelInfo model;
+        parse_gguf(gguf, model, size.QuadPart, file_base, metaEntries, topLevelTensors, blocks, architecture);
+        ModelContext ctx(model,pool,scratch_arena);
+    parse.Leave();
+        
+
     gc.frame_arena = arena_reserve(128 * 1024 * 1024);
     SvgViewer viewer;
+    GGUFLogView log_viewer(metaEntries,topLevelTensors,blocks,architecture);
+
     while (!glfwWindowShouldClose(gc.window)) 
     {
         glfwPollEvents();
@@ -1270,6 +1297,7 @@ int main(void)
             imgui_dockspace(nullptr);
             ImGui::ShowDemoWindow();
             viewer.Draw();
+            log_viewer.Draw();
 
         }
         clear_screen(clear_color);

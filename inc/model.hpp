@@ -2,6 +2,23 @@
 
 #include <utils.hpp>
 
+
+
+#define KV_K_AT(ctx, layer, pos) \
+    MAT3D_AT((ctx).kv_cache_k, (layer), (pos), 0, (ctx).max_seq, (ctx).kv_dim)
+
+#define KV_V_AT(ctx, layer, pos) \
+    MAT3D_AT((ctx).kv_cache_v, (layer), (pos), 0, (ctx).max_seq, (ctx).kv_dim)
+
+#define KV_HEAD_K(ctx, layer, pos, kv_head) \
+    MAT4D_AT((ctx).kv_cache_k, (layer), (pos), (kv_head), 0, \
+             (ctx).max_seq, (ctx).kv_dim / (ctx).head_dim, (ctx).head_dim)
+
+#define KV_HEAD_V(ctx, layer, pos, kv_head) \
+    MAT4D_AT((ctx).kv_cache_v, (layer), (pos), (kv_head), 0, \
+             (ctx).max_seq, (ctx).kv_dim / (ctx).head_dim, (ctx).head_dim)
+
+
 struct ModelConfig
 {
     u32 context_length;
